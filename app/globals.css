@@ -1,0 +1,182 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Disable all transitions during resize to prevent flicker */
+body.no-transitions * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Document Renderer Styles */
+.pdf-renderer {
+  @apply w-full;
+}
+
+.pdf-renderer .react-pdf__Page {
+  @apply mb-4 shadow-sm;
+}
+
+.pdf-renderer .react-pdf__Page__canvas {
+  @apply w-full h-auto rounded-lg;
+}
+
+.pdf-renderer .react-pdf__Page__textContent {
+  @apply w-full h-auto;
+}
+
+/* DOCX Renderer Styles */
+.docx-renderer {
+  @apply w-full;
+  overflow-x: auto;
+  overflow-y: visible;
+}
+
+.docx-wrapper {
+  font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+  font-size: 14px;
+  line-height: 1.6;
+  color: #1a1a1a;
+  padding: 20px;
+  background: white;
+  border-radius: 8px;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box;
+}
+
+.dark .docx-wrapper {
+  color: #e5e5e5;
+  background: #1a1a1a;
+}
+
+.docx-wrapper p {
+  @apply mb-3;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  max-width: 100%;
+}
+
+.docx-wrapper h1 {
+  @apply text-2xl font-bold mb-4 mt-6;
+}
+
+.docx-wrapper h2 {
+  @apply text-xl font-semibold mb-3 mt-5;
+}
+
+.docx-wrapper h3 {
+  @apply text-lg font-semibold mb-2 mt-4;
+}
+
+.docx-wrapper ul, .docx-wrapper ol {
+  @apply ml-6 mb-3;
+}
+
+.docx-wrapper li {
+  @apply mb-1;
+}
+
+.docx-wrapper strong, .docx-wrapper b {
+  @apply font-semibold;
+}
+
+.docx-wrapper em, .docx-wrapper i {
+  @apply italic;
+}
+
+.docx-wrapper table {
+  @apply border-collapse mb-4;
+  width: 100% !important;
+  max-width: 100%;
+  table-layout: auto;
+  overflow-x: auto;
+  display: table;
+}
+
+.docx-wrapper td, .docx-wrapper th {
+  @apply border border-gray-300 dark:border-gray-700 px-3 py-2;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  white-space: normal;
+  min-width: 60px;
+}
+
+.docx-wrapper th {
+  @apply bg-gray-100 dark:bg-gray-800 font-semibold;
+}
+
+/* Ensure images scale properly */
+.docx-wrapper img {
+  max-width: 100%;
+  height: auto;
+  display: block;
+}
+
+/* TXT Renderer Styles */
+.txt-renderer pre {
+  @apply whitespace-pre-wrap break-words;
+}
+
+
+:root {
+  --background: #F7F5F2;
+  --foreground: #1A1A1A;
+}
+
+.dark {
+  --background: #121212;
+  --foreground: #F5F5F5;
+}
+
+body {
+  color: var(--foreground);
+  background: var(--background);
+  font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Segoe UI', Roboto, sans-serif;
+  letter-spacing: -0.02em;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Custom scrollbar for warm aesthetic */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.1);
+  border-radius: 4px;
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.15);
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+/* Tauri drag region for custom title bar */
+.titlebar {
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.titlebar button {
+  -webkit-app-region: no-drag;
+}
+
+@layer utilities {
+  .text-balance {
+    text-wrap: balance;
+  }
+}

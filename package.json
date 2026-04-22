@@ -1,0 +1,49 @@
+{
+  "name": "trace",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "build:tauri": "next build --config next.config.prod.ts",
+    "start": "next start",
+    "lint": "next lint",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-shell": "^2.3.5",
+    "@tiptap/extension-bubble-menu": "^3.21.0",
+    "@tiptap/extension-color": "^3.21.0",
+    "@tiptap/extension-highlight": "^3.21.0",
+    "@tiptap/extension-link": "^3.21.0",
+    "@tiptap/extension-text-style": "^3.21.0",
+    "@tiptap/extension-underline": "^3.21.0",
+    "@tiptap/react": "^3.21.0",
+    "@tiptap/starter-kit": "^3.21.0",
+    "docx-preview": "^0.3.7",
+    "framer-motion": "^12.38.0",
+    "lucide-react": "^1.7.0",
+    "next": "15.1.6",
+    "next-intl": "^3.26.2",
+    "pdfjs-dist": "^5.5.207",
+    "pizzip": "^3.2.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-pdf": "^10.4.1"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.1.0",
+    "@types/node": "^22",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "autoprefixer": "^10.4.20",
+    "eslint": "^9",
+    "eslint-config-next": "15.1.6",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5"
+  }
+}

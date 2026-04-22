@@ -1,0 +1,19 @@
+{
+  "common": {
+    "appName": "Trace",
+    "welcome": "Traceへようこそ",
+    "description": "ミニマリストAIコラボレーションソフトウェア"
+  },
+  "navigation": {
+    "home": "ホーム",
+    "about": "について",
+    "settings": "設定"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "キャンセル",
+    "delete": "削除",
+    "edit": "編集",
+    "create": "作成"
+  }
+}

@@ -1,0 +1,19 @@
+{
+  "common": {
+    "appName": "Trace",
+    "welcome": "欢迎使用 Trace",
+    "description": "极简 AI 协作软件"
+  },
+  "navigation": {
+    "home": "首页",
+    "about": "关于",
+    "settings": "设置"
+  },
+  "actions": {
+    "save": "保存",
+    "cancel": "取消",
+    "delete": "删除",
+    "edit": "编辑",
+    "create": "创建"
+  }
+}

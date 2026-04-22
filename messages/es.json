@@ -1,0 +1,19 @@
+{
+  "common": {
+    "appName": "Trace",
+    "welcome": "Bienvenido a Trace",
+    "description": "Software de Colaboración AI Minimalista"
+  },
+  "navigation": {
+    "home": "Inicio",
+    "about": "Acerca de",
+    "settings": "Configuración"
+  },
+  "actions": {
+    "save": "Guardar",
+    "cancel": "Cancelar",
+    "delete": "Eliminar",
+    "edit": "Editar",
+    "create": "Crear"
+  }
+}
