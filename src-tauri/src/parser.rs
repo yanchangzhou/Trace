@@ -351,3 +351,23 @@ pub fn get_file_summary(file_path: &Path) -> String {
         }
     }
 }
+
+/// Extract chunks from a document for indexing
+pub fn extract_chunks(content: &str, chunk_size: usize) -> Vec<String> {
+    content
+        .chars()
+        .collect::<Vec<_>>()
+        .chunks(chunk_size)
+        .map(|chunk| chunk.iter().collect::<String>())
+        .collect()
+}
+
+/// Unified text extraction pipeline with chunking
+pub fn parse_and_chunk(file_path: &Path, chunk_size: usize) -> Result<Vec<String>> {
+    let parsed_document = parse_document(file_path)?;
+    let content = match parsed_document.file_type.as_str() {
+        "pdf" | "docx" | "pptx" | "text" => parsed_document.content_preview,
+        _ => return Err(anyhow::anyhow!("Unsupported file type for chunking")),
+    };
+    Ok(extract_chunks(&content, chunk_size))
+}

@@ -4,10 +4,12 @@
 mod search;
 mod watcher;
 mod parser;
+mod db;
 
 use once_cell::sync::Lazy;
 use parser::ParsedDocument;
 use search::{SearchEngine, SearchResult};
+use db::{Database, Note, NoteSource, Block, VersionHistory, Session};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
@@ -59,6 +61,8 @@ async fn search_local_files(query: String) -> Result<Vec<SearchResult>, String> 
 
 /// Tauri command: Get the TraceDocs folder path
 #[tauri::command]
+
+/// Tauri command: Create a block (block-level content)
 async fn get_docs_folder() -> Result<String, String> {
     let path = get_trace_docs_path();
     Ok(path.to_string_lossy().to_string())
@@ -76,6 +80,7 @@ async fn reindex_files() -> Result<usize, String> {
     Ok(count)
 }
 
+
 /// Tauri command: Open file in default application
 #[tauri::command]
 async fn open_file(path: String) -> Result<(), String> {
@@ -84,6 +89,7 @@ async fn open_file(path: String) -> Result<(), String> {
         std::process::Command::new("open")
             .arg(&path)
             .spawn()
+
             .map_err(|e| e.to_string())?;
     }
     
@@ -98,6 +104,7 @@ async fn open_file(path: String) -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
         std::process::Command::new("xdg-open")
+
             .arg(&path)
             .spawn()
             .map_err(|e| e.to_string())?;
@@ -107,6 +114,7 @@ async fn open_file(path: String) -> Result<(), String> {
 }
 
 /// Tauri command: Compact index to reduce disk usage
+
 #[tauri::command]
 async fn compact_index() -> Result<String, String> {
     SEARCH_ENGINE
@@ -115,6 +123,7 @@ async fn compact_index() -> Result<String, String> {
     
     Ok("Index compaction complete".to_string())
 }
+
 
 /// Tauri command: Clean up old cached entries (LRU policy)
 #[tauri::command]
@@ -131,6 +140,7 @@ async fn cleanup_old_entries() -> Result<usize, String> {
 async fn get_index_stats() -> Result<search::IndexStats, String> {
     SEARCH_ENGINE
         .get_stats()
+
         .map_err(|e| e.to_string())
 }
 
@@ -141,6 +151,7 @@ async fn parse_document(file_path: String) -> Result<ParsedDocument, String> {
     use std::path::PathBuf;
     use std::fs;
     
+
     // Convert to PathBuf for proper UTF-8 handling (supports Chinese characters)
     let path = PathBuf::from(&file_path);
     
@@ -336,6 +347,51 @@ async fn list_book_files(book_id: String) -> Result<Vec<SearchResult>, String> {
     Ok(filtered)
 }
 
+#[tauri::command]
+async fn create_note(database_url: &str, note: Note) -> Result<(), String> {
+    let db = Database::new(database_url).await.map_err(|e| e.to_string())?;
+    sqlx::query(
+        "INSERT INTO notes (book_id, title, content_json, plain_text, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?);"
+    )
+    .bind(note.book_id)
+    .bind(&note.title)
+    .bind(&note.content_json)
+    .bind(&note.plain_text)
+    .bind(&note.created_at)
+    .bind(&note.updated_at)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn list_notes_by_book(database_url: &str, book_id: i64) -> Result<Vec<Note>, String> {
+    let db = Database::new(database_url).await.map_err(|e| e.to_string())?;
+    let notes = sqlx::query_as!(Note, "SELECT * FROM notes WHERE book_id = ?", book_id)
+        .fetch_all(&db.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(notes)
+}
+
+#[tauri::command]
+async fn build_ai_context(database_url: &str, note_id: i64) -> Result<String, String> {
+    let db = Database::new(database_url).await.map_err(|e| e.to_string())?;
+    let note_sources = sqlx::query_as!(NoteSource, "SELECT * FROM note_sources WHERE note_id = ?", note_id)
+        .fetch_all(&db.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let context = note_sources
+        .into_iter()
+        .map(|source| format!("File ID: {}, Chunk ID: {}, Quote: {}", source.file_id, source.chunk_id, source.quote_text))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    Ok(context)
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -381,6 +437,26 @@ fn main() {
                 }
             });
 
+                    // Initialize or migrate local SQLite DB (create tables)
+                    let docs_path_for_db = docs_path.clone();
+                    tauri::async_runtime::spawn(async move {
+                        let mut db_path = docs_path_for_db;
+                        db_path.push("trace.db");
+                        let db_url = format!("sqlite://{}", db_path.to_string_lossy());
+
+                        match Database::new(&db_url).await {
+                            Ok(db) => {
+                                if let Err(e) = db.create_tables().await {
+                                    eprintln!("Failed to create core tables: {:?}", e);
+                                }
+                                if let Err(e) = db.create_block_table().await {
+                                    eprintln!("Failed to create block/version tables: {:?}", e);
+                                }
+                            }
+                            Err(e) => eprintln!("Failed to initialize DB: {:?}", e),
+                        }
+                    });
+
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -399,6 +475,17 @@ fn main() {
             select_files,
             copy_file_to_book,
             list_book_files,
+            create_note,
+            list_notes_by_book,
+            build_ai_context,
+            create_block,
+            list_blocks_by_note,
+            create_snapshot,
+            list_snapshots_by_note,
+            restore_snapshot,
+            save_session,
+            list_recent_sessions,
+            restore_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

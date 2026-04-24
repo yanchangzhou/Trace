@@ -401,3 +401,45 @@ pub struct IndexStats {
     pub num_segments: usize,
     pub index_size_mb: f64,
 }
+
+/// Search documents based on query and scope
+pub fn search_documents(query: &str, scope: Option<&str>) -> Result<Vec<SearchResult>> {
+    let reader = self.index.reader()?;
+    let searcher = reader.searcher();
+    let query_parser = QueryParser::for_index(&self.index, vec![self.name_field, self.path_field]);
+    let tantivy_query = query_parser.parse_query(query)?;
+    let top_docs = searcher.search(&tantivy_query, &TopDocs::with_limit(10))?.into_iter().map(
+        |(score, doc_address)| {
+            let doc = searcher.doc(doc_address)?;
+            Ok(SearchResult {
+                file_id: doc.get_first(self.path_field).unwrap().text().unwrap().to_string(),
+                file_name: doc.get_first(self.name_field).unwrap().text().unwrap().to_string(),
+                chunk_id: None,
+                snippet: "Snippet placeholder".to_string(),
+                score,
+                locator: None,
+                matched_terms: vec![query.to_string()],
+            })
+        },
+    ).collect::<Result<Vec<_>>>()?;
+
+    Ok(results)
+}
+
+/// Get document chunks by file ID
+pub fn get_document_chunks(file_id: &str) -> Result<Vec<String>> {
+    // Placeholder: Fetch chunks from storage or re-chunk the document
+    Ok(vec!["Chunk 1", "Chunk 2", "Chunk 3"])
+}
+
+/// Summarize a document by file ID
+pub fn summarize_document(file_id: &str) -> Result<String> {
+    // Placeholder: Generate a summary for the document
+    Ok("This is a summary of the document.".to_string())
+}
+
+/// Get related documents by file ID
+pub fn get_related_documents(file_id: &str) -> Result<Vec<String>> {
+    // Placeholder: Fetch related documents based on content similarity
+    Ok(vec!["Related Document 1", "Related Document 2"])
+}
