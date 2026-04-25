@@ -2,7 +2,7 @@
 
 ## 目标
 
-本文档基于当前代码库和 [roadmap.md](/Users/chowyc/CodePractice/Trace/roadmap.md)，总结 `Trace` 下一阶段的开发计划，并且按照两个人通过 GitHub 协作的方式进行拆分，重点是保证分工清晰、尽量减少合并冲突。
+本文档基于当前代码库和 [roadmap.md](./roadmap.md)，总结 `Trace` 下一阶段的开发计划，并且按照两个人通过 GitHub 协作的方式进行拆分，重点是保证分工清晰、尽量减少合并冲突。
 
 ## 当前项目判断
 
@@ -49,10 +49,10 @@ Trace 目前已经有了比较扎实的基础：
 
 主要负责文件范围：
 
-- [components/Canvas.tsx](/Users/chowyc/CodePractice/Trace/components/Canvas.tsx)
-- [components/FilePreviewPanel.tsx](/Users/chowyc/CodePractice/Trace/components/FilePreviewPanel.tsx)
-- [components/DocumentRenderer.tsx](/Users/chowyc/CodePractice/Trace/components/DocumentRenderer.tsx)
-- [components/SourceRail.tsx](/Users/chowyc/CodePractice/Trace/components/SourceRail.tsx)
+- [components/Canvas.tsx](./components/Canvas.tsx)
+- [components/FilePreviewPanel.tsx](./components/FilePreviewPanel.tsx)
+- [components/DocumentRenderer.tsx](./components/DocumentRenderer.tsx)
+- [components/SourceRail.tsx](./components/SourceRail.tsx)
 - `components/editor/*`
 - `components/ai/*`
 - `hooks/*`
@@ -72,14 +72,14 @@ Trace 目前已经有了比较扎实的基础：
 
 主要负责文件范围：
 
-- [src-tauri/src/main.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/main.rs)
-- [src-tauri/src/search.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/search.rs)
-- [src-tauri/src/parser.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/parser.rs)
-- [src-tauri/src/watcher.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/watcher.rs)
+- [src-tauri/src/main.rs](./src-tauri/src/main.rs)
+- [src-tauri/src/search.rs](./src-tauri/src/search.rs)
+- [src-tauri/src/parser.rs](./src-tauri/src/parser.rs)
+- [src-tauri/src/watcher.rs](./src-tauri/src/watcher.rs)
 - `src-tauri/src/db.rs`
 - `src-tauri/src/models.rs`
 - `src-tauri/src/document_pipeline.rs`
-- [lib/tauri.ts](/Users/chowyc/CodePractice/Trace/lib/tauri.ts) 中用于暴露命令接口的部分
+- [lib/tauri.ts](./lib/tauri.ts) 中用于暴露命令接口的部分
 
 ## 协作规则
 
@@ -174,7 +174,7 @@ Trace 目前已经有了比较扎实的基础：
 
 ### 你负责
 
-- 重构 [contexts/BookContext.tsx](/Users/chowyc/CodePractice/Trace/contexts/BookContext.tsx)
+- 重构 [contexts/BookContext.tsx](./contexts/BookContext.tsx)
 - 不再把 `localStorage` 当成数据真相来源
 - 让 `SourceRail` 和 `BookSelector` 改为从 Tauri commands 获取数据
 - 在创建、上传、删除、重命名、切换之后统一刷新数据
@@ -193,9 +193,9 @@ Trace 目前已经有了比较扎实的基础：
 
 ### 你朋友负责
 
-- 扩展 [src-tauri/src/parser.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/parser.rs)，做统一文本提取管线
+- 扩展 [src-tauri/src/parser.rs](./src-tauri/src/parser.rs)，做统一文本提取管线
 - 为 PDF、DOCX、PPTX、TXT、MD 增加 chunk 切分逻辑
-- 扩展 [src-tauri/src/search.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/search.rs)，支持文档正文索引
+- 扩展 [src-tauri/src/search.rs](./src-tauri/src/search.rs)，支持文档正文索引
 - 返回命中的片段和定位信息
 
 建议增加这些能力：
@@ -236,7 +236,7 @@ Trace 目前已经有了比较扎实的基础：
 
 ### 你负责
 
-- 拆分 [components/Canvas.tsx](/Users/chowyc/CodePractice/Trace/components/Canvas.tsx)
+- 拆分 [components/Canvas.tsx](./components/Canvas.tsx)
 - 增加自动保存
 - 增加 note 标题和保存状态
 - 完成 slash menu 的基础交互
@@ -320,7 +320,7 @@ Trace 目前已经有了比较扎实的基础：
 这一阶段尽量只集中修改：
 
 - `components/editor/*`
-- [app/globals.css](/Users/chowyc/CodePractice/Trace/app/globals.css)
+- [app/globals.css](./app/globals.css)
 - 编辑器相关前端状态
 
 ### 你朋友负责
@@ -378,7 +378,7 @@ Trace 目前已经有了比较扎实的基础：
 
 ### 拆分共享类型
 
-不要继续把所有类型都堆在 [types/index.ts](/Users/chowyc/CodePractice/Trace/types/index.ts)。
+不要继续把所有类型都堆在 [types/index.ts](./types/index.ts)。
 
 建议拆成：
 
@@ -390,7 +390,7 @@ Trace 目前已经有了比较扎实的基础：
 
 ### Tauri 统一出口
 
-所有前端调用原生命令的地方，都应该通过 [lib/tauri.ts](/Users/chowyc/CodePractice/Trace/lib/tauri.ts) 统一封装。
+所有前端调用原生命令的地方，都应该通过 [lib/tauri.ts](./lib/tauri.ts) 统一封装。
 
 这样前后端边界会更清楚。
 
@@ -398,10 +398,10 @@ Trace 目前已经有了比较扎实的基础：
 
 尤其是这些文件：
 
-- [components/Canvas.tsx](/Users/chowyc/CodePractice/Trace/components/Canvas.tsx)
-- [contexts/BookContext.tsx](/Users/chowyc/CodePractice/Trace/contexts/BookContext.tsx)
-- [src-tauri/src/main.rs](/Users/chowyc/CodePractice/Trace/src-tauri/src/main.rs)
-- [types/index.ts](/Users/chowyc/CodePractice/Trace/types/index.ts)
+- [components/Canvas.tsx](./components/Canvas.tsx)
+- [contexts/BookContext.tsx](./contexts/BookContext.tsx)
+- [src-tauri/src/main.rs](./src-tauri/src/main.rs)
+- [types/index.ts](./types/index.ts)
 
 这些都是高冲突文件，建议在多人并行开发之前就先拆开。
 
