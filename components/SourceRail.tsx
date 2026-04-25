@@ -1,13 +1,14 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Image, File, ChevronLeft, Upload, MoreVertical, Trash2 } from 'lucide-react';
+import { FileText, Image, File, ChevronLeft, Upload, MoreVertical, Trash2, RefreshCw, AlertCircle } from 'lucide-react';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useBook } from '@/contexts/BookContext';
 import { useFilePreview } from '@/contexts/FilePreviewContext';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import BookSelector from './BookSelector';
 import { SourceFile } from '@/types';
+import { reindexFiles } from '@/lib/tauri';
 
 const springConfig = {
   type: 'spring' as const,
@@ -17,55 +18,43 @@ const springConfig = {
 
 export default function SourceRail() {
   const { isCollapsed, setIsCollapsed } = useSidebar();
-  const { currentBook, addFileToBook, removeFileFromBook, getFilesForCurrentBook } = useBook();
+  const {
+    currentBook,
+    currentFiles,
+    addBrowserFilesToCurrentBook,
+    removeFileFromCurrentBook,
+    refreshLibrary,
+    isLoading: isLibraryLoading,
+    isTauri,
+    error,
+  } = useBook();
   const { openPreview } = useFilePreview();
-  const [isLoading, setIsLoading] = useState(false);
-  const [isTauri, setIsTauri] = useState(false);
+  const [isUploading, setIsUploading] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
-  useEffect(() => {
-    // Check if running in Tauri
-    const checkTauri = async () => {
-      try {
-        // @ts-ignore
-        if (window.__TAURI__) {
-          setIsTauri(true);
-        }
-      } catch (e) {
-        console.log('Running in browser mode');
-      }
-    };
-    
-    checkTauri();
-  }, []);
-
-  // Browser file upload handler
   const handleBrowserUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
     if (!files || files.length === 0 || !currentBook) return;
 
-    setIsLoading(true);
-
-    Array.from(files).forEach((file) => {
+    const nextFiles: SourceFile[] = Array.from(files).map((file) => {
       const fileName = file.name;
       const extension = fileName.split('.').pop()?.toLowerCase() || '';
-      
-      // Create file object for browser mode - store the File object
-      const newFile: SourceFile = {
+
+      return {
         id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         name: fileName,
-        path: URL.createObjectURL(file), // Use blob URL for browser
+        path: URL.createObjectURL(file),
         extension,
         bookId: currentBook.id,
         addedAt: Date.now(),
-        file, // Store the original File object for browser mode
+        file,
+        status: 'ready',
+        size: file.size,
       };
-      
-      addFileToBook(currentBook.id, newFile);
     });
 
-    setIsLoading(false);
-    // Reset input
+    addBrowserFilesToCurrentBook(nextFiles);
     event.target.value = '';
   };
 
@@ -75,113 +64,72 @@ export default function SourceRail() {
       return;
     }
 
-    // Browser mode: trigger file input
     if (!isTauri) {
       const input = document.createElement('input');
       input.type = 'file';
       input.multiple = true;
-      input.accept = '.pdf,.docx,.pptx,.txt'; // Only new formats in browser mode
-      input.onchange = (e) => handleBrowserUpload(e as any);
+      input.accept = '.pdf,.docx,.pptx,.txt,.md';
+      input.onchange = (e) => handleBrowserUpload(e as unknown as React.ChangeEvent<HTMLInputElement>);
       input.click();
       return;
     }
-    
-    // Tauri mode: use native dialog
+
     try {
-      // @ts-ignore
-      const { invoke } = window.__TAURI__;
-      
-      setIsLoading(true);
-      
+      const { invoke } = (window as any).__TAURI__;
+
+      setIsUploading(true);
+
       const selectedFiles: string[] = await invoke('select_files');
-      
       if (selectedFiles.length === 0) {
-        setIsLoading(false);
         return;
       }
-      
+
       for (const filePath of selectedFiles) {
         try {
-          const newPath: string = await invoke('copy_file_to_book', {
+          await invoke('copy_file_to_book', {
             filePath,
             bookId: currentBook.id,
           });
-          
-          const fileName = filePath.split('/').pop() || filePath.split('\\').pop() || 'unknown';
-          const extension = fileName.split('.').pop()?.toLowerCase() || '';
-          
-          const newFile: SourceFile = {
-            id: `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
-            name: fileName,
-            path: newPath,
-            extension,
-            bookId: currentBook.id,
-            addedAt: Date.now(),
-          };
-          
-          addFileToBook(currentBook.id, newFile);
-        } catch (error) {
-          console.error(`Failed to upload file ${filePath}:`, error);
+        } catch (uploadError) {
+          console.error(`Failed to upload file ${filePath}:`, uploadError);
         }
       }
-      
-      await invoke('reindex_files');
-      
-      setIsLoading(false);
-    } catch (error) {
-      console.error('Failed to upload files:', error);
-      setIsLoading(false);
-    }
-  };
 
-  const handleOpenFolder = async () => {
-    if (!isTauri) {
-      alert('This feature requires the Tauri desktop app. Files should be in ~/TraceDocs');
-      return;
-    }
-    
-    try {
-      // @ts-ignore
-      const { invoke } = window.__TAURI__;
-      const folder = await invoke('get_docs_folder');
-      await invoke('open_file', { path: folder });
-    } catch (error) {
-      console.error('Failed to open folder:', error);
+      await reindexFiles();
+      await refreshLibrary();
+    } catch (uploadError) {
+      console.error('Failed to upload files:', uploadError);
+    } finally {
+      setIsUploading(false);
     }
   };
 
   const handleFileClick = (file: SourceFile) => {
     openPreview(file);
-    // Keep sidebar state as is - don't auto expand/collapse
   };
 
   const handleDeleteFile = async (file: SourceFile, e: React.MouseEvent) => {
     e.stopPropagation();
-    
-    if (!currentBook) return;
-    
+
     const confirmed = confirm(`Delete "${file.name}"?`);
     if (!confirmed) return;
-    
-    removeFileFromBook(currentBook.id, file.id);
+
+    await removeFileFromCurrentBook(file);
     setOpenMenuId(null);
-    
-    // Delete file from filesystem in Tauri mode
-    if (isTauri) {
-      try {
-        // @ts-ignore
-        const { invoke } = window.__TAURI__;
-        // TODO: Add delete_file command in Rust
-        // await invoke('delete_file', { filePath: file.path });
-      } catch (error) {
-        console.error('Failed to delete file from filesystem:', error);
-      }
+  };
+
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshLibrary();
+    } finally {
+      setIsRefreshing(false);
     }
   };
 
   const getIcon = (extension: string) => {
-    const iconClass = "w-6 h-6";
-    
+    const iconClass = 'w-6 h-6';
+
     switch (extension.toLowerCase()) {
       case 'pdf':
         return <FileText className={iconClass} />;
@@ -201,20 +149,20 @@ export default function SourceRail() {
     }
   };
 
-  const files = getFilesForCurrentBook();
+  const files = currentFiles;
+  const railBusy = isLibraryLoading || isUploading;
 
   return (
     <motion.aside
       initial={{ x: -20, opacity: 0 }}
-      animate={{ 
-        x: 0, 
+      animate={{
+        x: 0,
         opacity: 1,
         width: isCollapsed ? '64px' : '280px',
       }}
       transition={springConfig}
       className="fixed left-0 top-12 bottom-0 bg-surface-light dark:bg-surface-dark border-r border-border-light dark:border-border-dark overflow-hidden z-40"
     >
-      {/* Header */}
       <div className="h-16 flex items-center justify-between px-4 border-b border-border-light dark:border-border-dark">
         {!isCollapsed && (
           <motion.h2
@@ -237,30 +185,47 @@ export default function SourceRail() {
         </button>
       </div>
 
-      {/* Book Selector */}
       <div className="p-4">
         <BookSelector isCollapsed={isCollapsed} />
       </div>
 
-      {/* Action Buttons */}
       <div className="px-4 pb-4 space-y-2">
-        <motion.button
-          whileHover={{ scale: 1.02 }}
-          whileTap={{ scale: 0.98 }}
-          onClick={handleUpload}
-          disabled={isLoading || !currentBook}
-          className={`w-full h-12 rounded-squircle bg-accent-primary text-white flex items-center gap-2 hover:bg-accent-primary/90 transition-colors shadow-ambient dark:shadow-ambient-dark disabled:opacity-50 disabled:cursor-not-allowed ${
-            isCollapsed ? 'justify-center px-2' : 'justify-center px-4'
-          }`}
-        >
-          <Upload className="w-5 h-5 flex-shrink-0" />
-          {!isCollapsed && <span className="text-sm font-medium">Upload Files</span>}
-        </motion.button>
+        <div className="flex gap-2">
+          <motion.button
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.98 }}
+            onClick={() => void handleUpload()}
+            disabled={railBusy || !currentBook}
+            className={`h-12 rounded-squircle bg-accent-primary text-white flex items-center gap-2 hover:bg-accent-primary/90 transition-colors shadow-ambient dark:shadow-ambient-dark disabled:opacity-50 disabled:cursor-not-allowed ${
+              isCollapsed ? 'w-full justify-center px-2' : 'flex-1 justify-center px-4'
+            }`}
+          >
+            <Upload className="w-5 h-5 flex-shrink-0" />
+            {!isCollapsed && <span className="text-sm font-medium">Upload Files</span>}
+          </motion.button>
+
+          {!isCollapsed && (
+            <button
+              onClick={() => void handleRefresh()}
+              disabled={railBusy || isRefreshing}
+              className="w-12 h-12 rounded-squircle bg-card-light dark:bg-card-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-background-light dark:hover:bg-background-dark transition-colors shadow-ambient dark:shadow-ambient-dark disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center"
+              aria-label="Refresh library"
+            >
+              <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin' : ''}`} />
+            </button>
+          )}
+        </div>
+
+        {!isCollapsed && error && (
+          <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-3 py-2 flex items-start gap-2">
+            <AlertCircle className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" />
+            <p className="text-xs text-red-500 leading-5">{error}</p>
+          </div>
+        )}
       </div>
 
-      {/* File List */}
       <div className="px-4 pb-4 overflow-y-auto" style={{ height: 'calc(100% - 280px)' }}>
-        {isLoading ? (
+        {railBusy ? (
           <div className="flex items-center justify-center py-8">
             <motion.div
               animate={{ rotate: 360 }}
@@ -295,10 +260,10 @@ export default function SourceRail() {
                   layout
                   initial={{ y: 20, opacity: 0 }}
                   animate={{ y: 0, opacity: 1 }}
-                  transition={{ 
+                  transition={{
                     layout: springConfig,
                     opacity: { duration: 0.3, delay: index * 0.05 },
-                    y: { ...springConfig, delay: index * 0.05 }
+                    y: { ...springConfig, delay: index * 0.05 },
                   }}
                   whileHover={{ scale: 1.03, y: -2 }}
                   onClick={(e) => {
@@ -310,17 +275,17 @@ export default function SourceRail() {
                   } bg-card-light dark:bg-card-dark rounded-squircle-sm cursor-pointer shadow-ambient dark:shadow-ambient-dark hover:shadow-ambient-lg dark:hover:shadow-ambient-lg-dark transition-shadow duration-200 relative group`}
                   title={file.name}
                 >
-                  <motion.div 
+                  <motion.div
                     layout
                     className="flex flex-col items-center justify-center h-full w-full p-4"
                   >
-                    <motion.div 
+                    <motion.div
                       layout
                       className="flex items-center justify-center text-accent-warm"
                     >
                       {getIcon(file.extension)}
                     </motion.div>
-                    
+
                     <motion.div
                       layout
                       initial={false}
@@ -329,11 +294,11 @@ export default function SourceRail() {
                         height: isCollapsed ? 0 : 'auto',
                         marginTop: isCollapsed ? 0 : 8,
                       }}
-                      transition={{ 
-                        type: 'spring', 
-                        stiffness: 200, 
+                      transition={{
+                        type: 'spring',
+                        stiffness: 200,
                         damping: 25,
-                        opacity: { duration: 0.2 }
+                        opacity: { duration: 0.2 },
                       }}
                       className="overflow-hidden w-full"
                     >
@@ -342,8 +307,7 @@ export default function SourceRail() {
                       </p>
                     </motion.div>
                   </motion.div>
-                  
-                  {/* Three-dot menu */}
+
                   {!isCollapsed && (
                     <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -355,8 +319,7 @@ export default function SourceRail() {
                       >
                         <MoreVertical className="w-3 h-3 text-text-secondary-light dark:text-text-secondary-dark" />
                       </button>
-                      
-                      {/* Menu dropdown */}
+
                       <AnimatePresence>
                         {openMenuId === file.id && (
                           <motion.div
@@ -371,7 +334,7 @@ export default function SourceRail() {
                             }}
                           >
                             <button
-                              onClick={(e) => handleDeleteFile(file, e)}
+                              onClick={(e) => void handleDeleteFile(file, e)}
                               className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-background-light dark:hover:bg-background-dark transition-colors flex items-center gap-2"
                             >
                               <Trash2 className="w-3 h-3" />
@@ -388,8 +351,7 @@ export default function SourceRail() {
           </AnimatePresence>
         )}
       </div>
-      
-      {/* Browser Mode Indicator */}
+
       {!isTauri && !isCollapsed && (
         <div className="absolute bottom-4 left-4 right-4">
           <div className="bg-accent-warm/10 border border-accent-warm/20 rounded-lg px-3 py-2">

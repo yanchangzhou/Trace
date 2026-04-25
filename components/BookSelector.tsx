@@ -16,7 +16,7 @@ const springConfig = {
 };
 
 export default function BookSelector({ isCollapsed }: BookSelectorProps) {
-  const { books, currentBook, selectBook, deleteBook, renameBook } = useBook();
+  const { books, currentBook, selectBook, deleteBook, renameBook, isLoading } = useBook();
   const [isOpen, setIsOpen] = useState(false);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showRenameModal, setShowRenameModal] = useState(false);
@@ -26,9 +26,9 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
   const buttonRefs = useRef<{ [key: string]: HTMLButtonElement | null }>({});
 
-  const handleDelete = (bookId: string) => {
+  const handleDelete = async (bookId: string) => {
     if (books.length > 1) {
-      deleteBook(bookId);
+      await deleteBook(bookId);
       setShowDeleteConfirm(false);
       setMenuBookId(null);
     }
@@ -36,7 +36,7 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
 
   const handleMenuClick = (bookId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    
+
     if (menuBookId === bookId) {
       setMenuBookId(null);
       return;
@@ -50,7 +50,7 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
         left: rect.right + 8,
       });
     }
-    
+
     setMenuBookId(bookId);
   };
 
@@ -92,7 +92,7 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
               <div className="flex items-center gap-2 flex-1 min-w-0">
                 <BookOpen className="w-5 h-5 text-accent-warm flex-shrink-0" />
                 <span className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark truncate">
-                  {currentBook?.name || 'Select Book'}
+                  {isLoading ? 'Loading books...' : currentBook?.name || 'Select Book'}
                 </span>
               </div>
               <ChevronDown
@@ -117,8 +117,8 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
                 {books.map((book) => (
                   <div key={book.id} className="relative group">
                     <button
-                      onClick={() => {
-                        selectBook(book.id);
+                      onClick={async () => {
+                        await selectBook(book.id);
                         setIsOpen(false);
                       }}
                       className={`w-full px-4 py-3 pr-12 text-left text-sm hover:bg-background-light dark:hover:bg-background-dark transition-colors ${
@@ -129,7 +129,7 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
                     >
                       {book.name}
                     </button>
-                    
+
                     <div className="absolute right-2 top-1/2 -translate-y-1/2">
                       <motion.button
                         ref={(el) => { buttonRefs.current[book.id] = el; }}
@@ -144,7 +144,7 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
                   </div>
                 ))}
               </div>
-              
+
               <div className="border-t border-border-light dark:border-border-dark">
                 <button
                   onClick={() => {
@@ -221,8 +221,8 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
       {showRenameModal && bookToEdit && (
         <RenameBookModal
           currentName={bookToEdit.name}
-          onRename={(newName) => {
-            renameBook(bookToEdit.id, newName);
+          onRename={async (newName) => {
+            await renameBook(bookToEdit.id, newName);
             setShowRenameModal(false);
             setBookToEdit(null);
           }}
@@ -236,8 +236,8 @@ export default function BookSelector({ isCollapsed }: BookSelectorProps) {
       {showDeleteConfirm && bookToEdit && (
         <DeleteConfirmModal
           bookName={bookToEdit.name}
-          onConfirm={() => {
-            handleDelete(bookToEdit.id);
+          onConfirm={async () => {
+            await handleDelete(bookToEdit.id);
             setBookToEdit(null);
           }}
           onClose={() => {
@@ -254,15 +254,21 @@ function CreateBookModal({ onClose }: { onClose: () => void }) {
   const { createBook } = useBook();
   const [bookName, setBookName] = useState('');
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     if (!bookName.trim()) {
       setError('Please enter a book name');
       return;
     }
-    
-    createBook(bookName.trim());
-    onClose();
+
+    setIsSubmitting(true);
+    try {
+      await createBook(bookName.trim());
+      onClose();
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -284,7 +290,7 @@ function CreateBookModal({ onClose }: { onClose: () => void }) {
         <h2 className="text-lg font-semibold text-text-primary-light dark:text-text-primary-dark mb-4">
           Create New Book
         </h2>
-        
+
         <input
           type="text"
           value={bookName}
@@ -293,30 +299,32 @@ function CreateBookModal({ onClose }: { onClose: () => void }) {
             setError('');
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleCreate();
+            if (e.key === 'Enter') void handleCreate();
             if (e.key === 'Escape') onClose();
           }}
           placeholder="Enter book name..."
           autoFocus
           className="w-full px-4 py-3 rounded-squircle bg-background-light dark:bg-background-dark text-text-primary-light dark:text-text-primary-dark placeholder-text-tertiary-light dark:placeholder-text-tertiary-dark border border-border-light dark:border-border-dark focus:outline-none focus:ring-2 focus:ring-accent-warm"
         />
-        
+
         {error && (
           <p className="text-sm text-red-500 mt-2">{error}</p>
         )}
-        
+
         <div className="flex gap-3 mt-6">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-squircle bg-background-light dark:bg-background-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-card-light dark:hover:bg-card-dark transition-colors"
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-squircle bg-background-light dark:bg-background-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-card-light dark:hover:bg-card-dark transition-colors disabled:opacity-60"
           >
             Cancel
           </button>
           <button
-            onClick={handleCreate}
-            className="flex-1 px-4 py-2 rounded-squircle bg-accent-warm text-white hover:bg-accent-warm/90 transition-colors shadow-ambient dark:shadow-ambient-dark"
+            onClick={() => void handleCreate()}
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-squircle bg-accent-warm text-white hover:bg-accent-warm/90 transition-colors shadow-ambient dark:shadow-ambient-dark disabled:opacity-60"
           >
-            Create
+            {isSubmitting ? 'Creating...' : 'Create'}
           </button>
         </div>
       </motion.div>
@@ -330,19 +338,25 @@ function RenameBookModal({
   onClose,
 }: {
   currentName: string;
-  onRename: (newName: string) => void;
+  onRename: (newName: string) => Promise<void>;
   onClose: () => void;
 }) {
   const [bookName, setBookName] = useState(currentName);
   const [error, setError] = useState('');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const handleRename = () => {
+  const handleRename = async () => {
     if (!bookName.trim()) {
       setError('Please enter a book name');
       return;
     }
-    
-    onRename(bookName.trim());
+
+    setIsSubmitting(true);
+    try {
+      await onRename(bookName.trim());
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -364,7 +378,7 @@ function RenameBookModal({
         <h2 className="text-lg font-semibold text-text-primary-light dark:text-text-primary-dark mb-4">
           Rename Book
         </h2>
-        
+
         <input
           type="text"
           value={bookName}
@@ -373,30 +387,32 @@ function RenameBookModal({
             setError('');
           }}
           onKeyDown={(e) => {
-            if (e.key === 'Enter') handleRename();
+            if (e.key === 'Enter') void handleRename();
             if (e.key === 'Escape') onClose();
           }}
           placeholder="Enter new book name..."
           autoFocus
           className="w-full px-4 py-3 rounded-squircle bg-background-light dark:bg-background-dark text-text-primary-light dark:text-text-primary-dark placeholder-text-tertiary-light dark:placeholder-text-tertiary-dark border border-border-light dark:border-border-dark focus:outline-none focus:ring-2 focus:ring-accent-warm"
         />
-        
+
         {error && (
           <p className="text-sm text-red-500 mt-2">{error}</p>
         )}
-        
+
         <div className="flex gap-3 mt-6">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-squircle bg-background-light dark:bg-background-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-card-light dark:hover:bg-card-dark transition-colors"
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-squircle bg-background-light dark:bg-background-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-card-light dark:hover:bg-card-dark transition-colors disabled:opacity-60"
           >
             Cancel
           </button>
           <button
-            onClick={handleRename}
-            className="flex-1 px-4 py-2 rounded-squircle bg-accent-warm text-white hover:bg-accent-warm/90 transition-colors shadow-ambient dark:shadow-ambient-dark"
+            onClick={() => void handleRename()}
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-squircle bg-accent-warm text-white hover:bg-accent-warm/90 transition-colors shadow-ambient dark:shadow-ambient-dark disabled:opacity-60"
           >
-            Rename
+            {isSubmitting ? 'Renaming...' : 'Rename'}
           </button>
         </div>
       </motion.div>
@@ -410,9 +426,20 @@ function DeleteConfirmModal({
   onClose,
 }: {
   bookName: string;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void>;
   onClose: () => void;
 }) {
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleConfirm = async () => {
+    setIsSubmitting(true);
+    try {
+      await onConfirm();
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0 }}
@@ -432,23 +459,25 @@ function DeleteConfirmModal({
         <h2 className="text-lg font-semibold text-text-primary-light dark:text-text-primary-dark mb-2">
           Delete Book
         </h2>
-        
+
         <p className="text-sm text-text-secondary-light dark:text-text-secondary-dark mb-6">
           Are you sure you want to delete <span className="font-medium text-text-primary-light dark:text-text-primary-dark">"{bookName}"</span>? This will also delete all files in this book. This action cannot be undone.
         </p>
-        
+
         <div className="flex gap-3">
           <button
             onClick={onClose}
-            className="flex-1 px-4 py-2 rounded-squircle bg-background-light dark:bg-background-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-card-light dark:hover:bg-card-dark transition-colors"
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-squircle bg-background-light dark:bg-background-dark text-text-secondary-light dark:text-text-secondary-dark hover:bg-card-light dark:hover:bg-card-dark transition-colors disabled:opacity-60"
           >
             Cancel
           </button>
           <button
-            onClick={onConfirm}
-            className="flex-1 px-4 py-2 rounded-squircle bg-red-500 text-white hover:bg-red-600 transition-colors shadow-ambient dark:shadow-ambient-dark"
+            onClick={() => void handleConfirm()}
+            disabled={isSubmitting}
+            className="flex-1 px-4 py-2 rounded-squircle bg-red-500 text-white hover:bg-red-600 transition-colors shadow-ambient dark:shadow-ambient-dark disabled:opacity-60"
           >
-            Delete
+            {isSubmitting ? 'Deleting...' : 'Delete'}
           </button>
         </div>
       </motion.div>

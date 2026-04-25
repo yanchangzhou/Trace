@@ -79,5 +79,7 @@ export interface SourceFile {
   extension: string;
   bookId: string;
   addedAt: number;
+  size?: number;
+  status?: string;
   file?: File; // Store original File object for browser mode
 }
