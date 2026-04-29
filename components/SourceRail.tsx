@@ -5,10 +5,10 @@ import { FileText, Image, File, ChevronLeft, Upload, MoreVertical, Trash2, Refre
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useBook } from '@/contexts/BookContext';
 import { useFilePreview } from '@/contexts/FilePreviewContext';
-import { useState } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import BookSelector from './BookSelector';
 import { SourceFile } from '@/types';
-import { reindexFiles } from '@/lib/tauri';
+import { reindexFiles, getIndexStats } from '@/lib/tauri';
 
 const springConfig = {
   type: 'spring' as const,
@@ -32,6 +32,26 @@ export default function SourceRail() {
   const [isUploading, setIsUploading] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [indexStats, setIndexStats] = useState<{
+    total_documents: number;
+    total_chunks: number;
+    index_size_bytes: number;
+    last_indexed_at: number;
+  } | null>(null);
+
+  const loadIndexStats = useCallback(async () => {
+    if (!isTauri) return;
+    try {
+      const stats = await getIndexStats();
+      setIndexStats(stats);
+    } catch {
+      setIndexStats(null);
+    }
+  }, [isTauri]);
+
+  useEffect(() => {
+    loadIndexStats();
+  }, [loadIndexStats, currentFiles]);
 
   const handleBrowserUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
     const files = event.target.files;
@@ -351,6 +371,19 @@ export default function SourceRail() {
           </AnimatePresence>
         )}
       </div>
+
+      {isTauri && !isCollapsed && indexStats && (
+        <div className="absolute bottom-16 left-4 right-4">
+          <div className="bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded-lg px-3 py-2 space-y-1">
+            <div className="flex items-center justify-between text-xs">
+              <span className="text-text-tertiary-light dark:text-text-tertiary-dark">Indexed</span>
+              <span className="text-text-primary-light dark:text-text-primary-dark font-medium">
+                {indexStats.total_documents} docs / {indexStats.total_chunks} chunks
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
 
       {!isTauri && !isCollapsed && (
         <div className="absolute bottom-4 left-4 right-4">
