@@ -5,6 +5,10 @@ use std::path::Path;
 
 /// Maximum content size to parse (2KB summary)
 const MAX_SUMMARY_SIZE: usize = 2048;
+/// Maximum chunk size in characters
+const CHUNK_SIZE: usize = 2000;
+/// Chunk overlap in characters
+const CHUNK_OVERLAP: usize = 200;
 
 /// Parsed document content with structured metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -309,6 +313,158 @@ fn parse_text(file_path: &Path) -> Result<ParsedDocument> {
         content_preview,
         content_bytes: Some(bytes),
     })
+}
+
+/// Result of parsing with full text for chunking
+pub struct ParsedText {
+    pub text: String,
+    pub word_count: usize,
+}
+
+/// Parse a document and extract full text for chunking
+pub fn parse_to_text(file_path: &Path) -> Result<ParsedText> {
+    let extension = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    match extension.as_str() {
+        "docx" => extract_docx_text(file_path),
+        "pptx" => extract_pptx_text(file_path),
+        "txt" | "md" => extract_raw_text(file_path),
+        "pdf" => {
+            // PDF text extraction is limited without a PDF library
+            let bytes = std::fs::read(file_path)?;
+            let text = String::from_utf8_lossy(&bytes).to_string();
+            let word_count = text.split_whitespace().count();
+            Ok(ParsedText { text: text.chars().take(10000).collect(), word_count })
+        }
+        _ => Err(anyhow::anyhow!("Unsupported file type: {}", extension)),
+    }
+}
+
+fn extract_docx_text(file_path: &Path) -> Result<ParsedText> {
+    let bytes = std::fs::read(file_path)?;
+    let docx = docx_rs::read_docx(&bytes)?;
+    let mut text = String::new();
+    for child in &docx.document.children {
+        if let docx_rs::DocumentChild::Paragraph(para) = child {
+            let para_text: String = para.children.iter().filter_map(|c| {
+                if let docx_rs::ParagraphChild::Run(run) = c {
+                    Some(run.children.iter().filter_map(|rc| {
+                        if let docx_rs::RunChild::Text(t) = rc { Some(t.text.clone()) } else { None }
+                    }).collect::<String>())
+                } else { None }
+            }).collect();
+            if !para_text.is_empty() {
+                text.push_str(&para_text);
+                text.push_str("\n\n");
+            }
+        }
+    }
+    let word_count = text.split_whitespace().count();
+    Ok(ParsedText { text, word_count })
+}
+
+fn extract_pptx_text(file_path: &Path) -> Result<ParsedText> {
+    let bytes = std::fs::read(file_path)?;
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+    let mut text = String::new();
+    let mut slide_number = 1;
+    loop {
+        let slide_path = format!("ppt/slides/slide{}.xml", slide_number);
+        match archive.by_name(&slide_path) {
+            Ok(mut slide_file) => {
+                let mut content = String::new();
+                slide_file.read_to_string(&mut content)?;
+                let slide_text = extract_text_from_xml(&content);
+                if !slide_text.is_empty() {
+                    text.push_str(&format!("Slide {}: ", slide_number));
+                    text.push_str(&slide_text);
+                    text.push_str("\n\n");
+                }
+                slide_number += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    let word_count = text.split_whitespace().count();
+    Ok(ParsedText { text, word_count })
+}
+
+fn extract_raw_text(file_path: &Path) -> Result<ParsedText> {
+    let bytes = std::fs::read(file_path)?;
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let word_count = text.split_whitespace().count();
+    Ok(ParsedText { text, word_count })
+}
+
+/// Split text into overlapping chunks for indexing
+pub fn split_into_chunks(text: &str, file_id: &str) -> Vec<crate::models::DocumentChunk> {
+    let mut chunks = Vec::new();
+    let chars: Vec<char> = text.chars().collect();
+
+    if chars.is_empty() {
+        return chunks;
+    }
+
+    let mut start = 0;
+    let mut chunk_index = 0;
+
+    while start < chars.len() {
+        let end = (start + CHUNK_SIZE).min(chars.len());
+
+        // Try to break at a paragraph or sentence boundary
+        let mut break_point = end;
+        if break_point < chars.len() {
+            // Look backwards for a good break point
+            let search_start = (break_point as isize - 100).max(start as isize) as usize;
+            for i in (search_start..break_point).rev() {
+                if chars[i] == '\n' && i + 1 < chars.len() && chars[i + 1] == '\n' {
+                    break_point = i + 2; // After double newline
+                    break;
+                }
+            }
+            if break_point == end {
+                // Fall back to sentence boundary
+                for i in (search_start..break_point).rev() {
+                    if chars[i] == '.' || chars[i] == '!' || chars[i] == '?' || chars[i] == '。' {
+                        break_point = i + 1;
+                        break;
+                    }
+                }
+            }
+        }
+
+        let chunk_text: String = chars[start..break_point].iter().collect();
+        let token_count = chunk_text.split_whitespace().count();
+        let locator = serde_json::json!({
+            "start_char": start,
+            "end_char": break_point,
+            "chunk_index": chunk_index,
+        });
+
+        chunks.push(crate::models::DocumentChunk {
+            id: uuid::Uuid::new_v4().to_string(),
+            file_id: file_id.to_string(),
+            chunk_index,
+            text: chunk_text,
+            token_count,
+            locator_json: locator.to_string(),
+        });
+
+        chunk_index += 1;
+        let next_start = break_point.saturating_sub(CHUNK_OVERLAP);
+        if next_start <= start {
+            start = break_point;
+        } else {
+            start = next_start;
+        }
+    }
+
+    chunks
 }
 
 /// Extract text from XML content (simple approach)
