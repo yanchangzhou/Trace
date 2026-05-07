@@ -47,6 +47,9 @@ importers:
       '@tiptap/starter-kit':
         specifier: ^3.21.0
         version: 3.21.0
+      '@tiptap/suggestion':
+        specifier: ^3.22.5
+        version: 3.22.5(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))(@tiptap/pm@3.21.0)
       docx-preview:
         specifier: ^0.3.7
         version: 0.3.7
@@ -758,6 +761,12 @@ packages:
 
   '@tiptap/starter-kit@3.21.0':
     resolution: {integrity: sha512-w7fWxglDtqXFBgRYH+LforJyUboSAQllnWQbGVSTyX4rsICqZjkb3f6CTSUWpGoGKmlmbb2ZpEuoik7tur9d8Q==}
+
+  '@tiptap/suggestion@3.22.5':
+    resolution: {integrity: sha512-Uv79Ht/o4mx1GWIT65jeQTE67LMrA+K7d8p51XOe9PJw0H0fS3iCdeMJ8tAo3h6QrMJFejdsB7z8jJL9UbAnhA==}
+    peerDependencies:
+      '@tiptap/core': 3.22.5
+      '@tiptap/pm': 3.22.5
 
   '@tybys/wasm-util@0.10.1':
     resolution: {integrity: sha512-9tTaPJLSiejZKx+Bmog4uSubteqTvFrVrURwkmHixBo0G4seD0zUxp98E1DzUBJxLQ3NPwXrGKDiVjwx/DpPsg==}
@@ -3053,6 +3062,11 @@ snapshots:
       '@tiptap/extension-text': 3.21.0(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))
       '@tiptap/extension-underline': 3.21.0(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))
       '@tiptap/extensions': 3.21.0(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))(@tiptap/pm@3.21.0)
+      '@tiptap/pm': 3.21.0
+
+  '@tiptap/suggestion@3.22.5(@tiptap/core@3.21.0(@tiptap/pm@3.21.0))(@tiptap/pm@3.21.0)':
+    dependencies:
+      '@tiptap/core': 3.21.0(@tiptap/pm@3.21.0)
       '@tiptap/pm': 3.21.0
 
   '@tybys/wasm-util@0.10.1':

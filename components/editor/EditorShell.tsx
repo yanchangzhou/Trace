@@ -19,7 +19,7 @@ import { useEditorContext } from '@/contexts/EditorContext';
 import { useBook } from '@/contexts/BookContext';
 import { createNote, updateNote } from '@/lib/tauri';
 import EditorToolbar from './EditorToolbar';
-import SlashMenu from './SlashMenu';
+import { SlashCommand } from './suggestion';
 import { BlockDragExtension } from './BlockDragExtension';
 
 const springConfig = {
@@ -46,7 +46,6 @@ export default function EditorShell() {
   } = useEditorContext();
 
   const [plainText, setPlainText] = useState('');
-  const [showSlashMenu, setShowSlashMenu] = useState(false);
   const titleInputRef = useRef<HTMLInputElement>(null);
   const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -76,6 +75,7 @@ export default function EditorShell() {
       BlockDragExtension.configure({
         dragHandleSelector: '.block-drag-handle',
       }),
+      SlashCommand,
     ],
     content: '<p></p>',
     editorProps: {
@@ -139,23 +139,6 @@ export default function EditorShell() {
     };
   }, [noteTitle]);
 
-  // Slash menu detection: show when "/" is typed
-  useEffect(() => {
-    if (!editor) return;
-    const handler = ({ editor: e }: { editor: typeof editor }) => {
-      const { from } = e.state.selection;
-      const node = e.state.doc.resolve(from).nodeBefore;
-      const text = node?.text || '';
-      if (text.endsWith('/')) {
-        setShowSlashMenu(true);
-      } else {
-        setShowSlashMenu(false);
-      }
-    };
-    editor.on('update', handler);
-    return () => { editor.off('update', handler); };
-  }, [editor]);
-
   // Register insert reference handler for preview panel
   useEffect(() => {
     if (!editor) return;
@@ -180,10 +163,6 @@ export default function EditorShell() {
     });
     return () => registerInsertHandler(null);
   }, [editor, registerInsertHandler]);
-
-  const handleAIAction = (action: string) => {
-    toggleAIPanel();
-  };
 
   const saveStatusLabel = saveStatus === 'saved'
     ? lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Saved'
@@ -235,16 +214,6 @@ export default function EditorShell() {
             >
               <EditorToolbar editor={editor} />
             </BubbleMenu>
-          )}
-
-          {/* Slash Menu */}
-          {editor && (
-            <SlashMenu
-              editor={editor}
-              isOpen={showSlashMenu}
-              onClose={() => setShowSlashMenu(false)}
-              onAIAction={handleAIAction}
-            />
           )}
 
           {/* Editor Content */}
