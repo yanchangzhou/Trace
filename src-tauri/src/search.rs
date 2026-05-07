@@ -7,7 +7,6 @@ use tantivy::query::QueryParser;
 use tantivy::schema::*;
 use tantivy::{doc, Index, IndexWriter, ReloadPolicy, TantivyDocument};
 use tantivy::tokenizer::*;
-use tantivy::merge_policy::LogMergePolicy;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum file size to index (10MB) - larger files only get metadata indexed
@@ -15,6 +14,13 @@ const MAX_CONTENT_SIZE: u64 = 10_000_000;
 
 /// LRU cache expiry in seconds (30 days)
 const CACHE_EXPIRY_SECONDS: i64 = 30 * 24 * 60 * 60;
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs() as i64
+}
 
 /// Search result returned to the frontend
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -25,6 +31,20 @@ pub struct SearchResult {
     pub size: u64,
     pub last_modified: i64,
     pub score: f32,
+}
+
+/// Content search result with snippet and locator
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContentSearchResult {
+    pub file_id: String,
+    pub file_name: String,
+    pub path: String,
+    pub extension: String,
+    pub chunk_id: String,
+    pub snippet: String,
+    pub score: f32,
+    pub locator: String,
+    pub matched_terms: Vec<String>,
 }
 
 /// The search engine powered by Tantivy with storage optimization
@@ -38,6 +58,9 @@ pub struct SearchEngine {
     last_modified_field: Field,
     last_accessed_field: Field,
     size_field: Field,
+    content_field: Field,
+    chunk_id_field: Field,
+    file_id_field: Field,
 }
 
 impl SearchEngine {
@@ -45,9 +68,8 @@ impl SearchEngine {
     pub fn new(index_path: &Path) -> Result<Self> {
         // Create schema with multi-language fields
         let mut schema_builder = Schema::builder();
-        
+
         // Name field: indexed with ICU tokenizer for multi-language support
-        // OPTIMIZATION: Only store name, not full content
         let text_options = TextOptions::default()
             .set_indexing_options(
                 TextFieldIndexing::default()
@@ -55,24 +77,40 @@ impl SearchEngine {
                     .set_index_option(IndexRecordOption::WithFreqsAndPositions),
             )
             .set_stored();
-        
+
         let name_field = schema_builder.add_text_field("name", text_options.clone());
-        
+
+        // Content field: indexed for full-text search (not stored to save space)
+        let content_options = TextOptions::default()
+            .set_indexing_options(
+                TextFieldIndexing::default()
+                    .set_tokenizer("icu")
+                    .set_index_option(IndexRecordOption::WithFreqsAndPositions),
+            )
+            .set_stored();
+        let content_field = schema_builder.add_text_field("content", content_options);
+
+        // File ID field: for linking chunks to files
+        let file_id_field = schema_builder.add_text_field("file_id", STRING | STORED);
+
+        // Chunk ID field
+        let chunk_id_field = schema_builder.add_text_field("chunk_id", STRING | STORED);
+
         // Path field: stored only (not searchable)
         let path_field = schema_builder.add_text_field("path", STORED);
-        
+
         // Extension field: indexed as keyword (exact match)
         let extension_field = schema_builder.add_text_field("extension", STRING | STORED);
-        
+
         // Last modified timestamp: indexed for sorting
         let last_modified_field = schema_builder.add_i64_field("last_modified", INDEXED | STORED);
-        
+
         // Last accessed timestamp: for LRU cache policy
         let last_accessed_field = schema_builder.add_i64_field("last_accessed", INDEXED | STORED);
-        
+
         // File size: stored for display
         let size_field = schema_builder.add_u64_field("size", STORED);
-        
+
         let schema = schema_builder.build();
         
         // Create directory if it doesn't exist
@@ -108,6 +146,9 @@ impl SearchEngine {
             last_modified_field,
             last_accessed_field,
             size_field,
+            content_field,
+            chunk_id_field,
+            file_id_field,
         })
     }
     
@@ -137,7 +178,7 @@ impl SearchEngine {
         let size = metadata.len();
         
         // Current timestamp for last_accessed
-        let now = SystemTime::now()
+        let _now = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
             .as_secs() as i64;
         
@@ -154,7 +195,7 @@ impl SearchEngine {
             self.path_field => path,
             self.extension_field => extension,
             self.last_modified_field => last_modified,
-            self.last_accessed_field => now,
+            self.last_accessed_field => _now,
             self.size_field => size,
         ))?;
         
@@ -372,24 +413,156 @@ impl SearchEngine {
         Ok(count)
     }
     
+    /// Index a content chunk for full-text search
+    pub fn index_chunk(&self, chunk: &crate::models::DocumentChunk, file_name: &str, file_path: &str, extension: &str) -> Result<()> {
+        let writer = self.writer.lock().unwrap();
+        writer.add_document(doc!(
+            self.name_field => file_name.to_string(),
+            self.path_field => file_path.to_string(),
+            self.extension_field => extension.to_string(),
+            self.content_field => chunk.text.clone(),
+            self.file_id_field => chunk.file_id.clone(),
+            self.chunk_id_field => chunk.id.clone(),
+            self.last_modified_field => now_secs(),
+            self.last_accessed_field => now_secs(),
+            self.size_field => chunk.text.len() as u64,
+        ))?;
+        Ok(())
+    }
+
+    /// Remove all chunks for a given file from the index
+    pub fn remove_chunks_for_file(&self, file_id: &str) -> Result<()> {
+        let writer = self.writer.lock().unwrap();
+        let term = Term::from_field_text(self.file_id_field, file_id);
+        writer.delete_term(term);
+        Ok(())
+    }
+
+    /// Content-based search across document chunks
+    pub fn search_content(&self, query_str: &str, limit: usize) -> Result<Vec<ContentSearchResult>> {
+        let reader = self.index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()?;
+
+        let searcher = reader.searcher();
+        let query_parser = QueryParser::for_index(&self.index, vec![self.content_field]);
+        let query = query_parser.parse_query(query_str)?;
+
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+        let mut results = Vec::new();
+
+        for (score, doc_address) in top_docs {
+            let retrieved_doc: TantivyDocument = searcher.doc(doc_address)?;
+
+            let content = retrieved_doc
+                .get_first(self.content_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("");
+
+            // Generate a snippet around matching terms
+            let snippet = if content.len() > 300 {
+                let lower_content = content.to_lowercase();
+                let lower_query = query_str.to_lowercase();
+                let terms: Vec<&str> = lower_query.split_whitespace().collect();
+
+                // Find first matching term position
+                let mut match_pos = None;
+                for term in &terms {
+                    if let Some(pos) = lower_content.find(*term) {
+                        match_pos = Some(pos);
+                        break;
+                    }
+                }
+
+                if let Some(pos) = match_pos {
+                    let start = pos.saturating_sub(60);
+                    let end = (pos + 240).min(content.len());
+                    let mut snippet_str = String::new();
+                    if start > 0 { snippet_str.push_str("..."); }
+                    if content.is_char_boundary(start) && content.is_char_boundary(end) {
+                        snippet_str.push_str(&content[start..end]);
+                    } else {
+                        snippet_str.push_str(&content[pos..end.min(pos + 280)]);
+                    }
+                    if end < content.len() { snippet_str.push_str("..."); }
+                    snippet_str
+                } else {
+                    content.chars().take(300).collect::<String>() + "..."
+                }
+            } else {
+                content.to_string()
+            };
+
+            let file_name = retrieved_doc
+                .get_first(self.name_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let path = retrieved_doc
+                .get_first(self.path_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let extension = retrieved_doc
+                .get_first(self.extension_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let file_id = retrieved_doc
+                .get_first(self.file_id_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let chunk_id = retrieved_doc
+                .get_first(self.chunk_id_field)
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let matched_terms: Vec<String> = query_str
+                .split_whitespace()
+                .map(|t| t.to_string())
+                .collect();
+
+            results.push(ContentSearchResult {
+                file_id,
+                file_name,
+                path,
+                extension,
+                chunk_id,
+                snippet,
+                score,
+                locator: String::new(),
+                matched_terms,
+            });
+        }
+
+        Ok(results)
+    }
+
     /// Get index statistics for monitoring
     pub fn get_stats(&self) -> Result<IndexStats> {
         let reader = self.index
             .reader_builder()
             .reload_policy(ReloadPolicy::OnCommitWithDelay)
             .try_into()?;
-        
+
         let searcher = reader.searcher();
-        let num_docs = searcher.num_docs() as usize;
+        let total_documents = searcher.num_docs() as usize;
         let num_segments = searcher.segment_readers().len();
-        
-        // Calculate approximate index size by checking directory
-        let index_size = 0; // Simplified - would need directory access
-        
+        let index_size_bytes = 0u64; // Simplified
+
         Ok(IndexStats {
-            num_docs,
+            total_documents,
+            total_chunks: 0,
             num_segments,
-            index_size_mb: index_size as f64 / 1_000_000.0,
+            index_size_bytes,
+            last_indexed_at: now_secs(),
         })
     }
 }
@@ -397,7 +570,9 @@ impl SearchEngine {
 /// Index statistics
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IndexStats {
-    pub num_docs: usize,
+    pub total_documents: usize,
+    pub total_chunks: usize,
     pub num_segments: usize,
-    pub index_size_mb: f64,
+    pub index_size_bytes: u64,
+    pub last_indexed_at: i64,
 }

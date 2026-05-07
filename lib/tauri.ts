@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Book, SourceFile } from '@/types';
+import type { Book, SourceFile, ContentSearchResult, DocumentChunk, Note, NoteSource, AIRequest } from '@/types';
 
 export interface SearchResult {
   name: string;
@@ -277,6 +277,73 @@ export function storeCurrentBookId(bookId: string | null): void {
   }
 
   window.localStorage.setItem(CURRENT_BOOK_KEY, bookId);
+}
+
+// ── Stage 2: Content search & document retrieval ──
+
+export async function searchDocuments(query: string, scope?: string): Promise<ContentSearchResult[]> {
+  return await invoke<ContentSearchResult[]>('search_documents', { query, scope });
+}
+
+export async function getDocumentChunks(fileId: string): Promise<DocumentChunk[]> {
+  return await invoke<DocumentChunk[]>('get_document_chunks', { fileId });
+}
+
+export async function summarizeDocument(fileId: string): Promise<string> {
+  return await invoke<string>('summarize_document', { fileId });
+}
+
+export async function getIndexStats(): Promise<{
+  total_documents: number;
+  total_chunks: number;
+  index_size_bytes: number;
+  last_indexed_at: number;
+}> {
+  return await invoke('get_index_stats');
+}
+
+// ── Stage 3: Notes & AI ──
+
+export async function createNote(bookId: string, title: string, contentJson: string, plainText: string): Promise<Note> {
+  return await invoke<Note>('create_note', { bookId, title, contentJson, plainText });
+}
+
+export async function updateNote(noteId: string, title: string, contentJson: string, plainText: string): Promise<Note> {
+  return await invoke<Note>('update_note', { noteId, title, contentJson, plainText });
+}
+
+export async function getNote(noteId: string): Promise<Note> {
+  return await invoke<Note>('get_note', { noteId });
+}
+
+export async function listNotesByBook(bookId: string): Promise<Note[]> {
+  return await invoke<Note[]>('list_notes_by_book', { bookId });
+}
+
+export async function buildAIContext(request: AIRequest): Promise<string> {
+  return await invoke<string>('build_ai_context', { request });
+}
+
+export async function generateWithContext(
+  request: AIRequest,
+  onToken: (token: string) => void,
+  onSource: (source: import('@/types').AISource) => void,
+): Promise<string> {
+  return await invoke<string>('generate_with_context', {
+    request,
+    onToken,
+    onSource,
+  });
+}
+
+// ── Stage 5: Style profiles ──
+
+export async function getStyleProfile(style: string): Promise<import('@/types').StyleProfile | null> {
+  return await invokeOptional<import('@/types').StyleProfile>('get_style_profile', { style });
+}
+
+export async function extractMyStyle(): Promise<import('@/types').StyleProfile | null> {
+  return await invokeOptional<import('@/types').StyleProfile>('extract_my_style');
 }
 
 export function formatFileSize(bytes: number): string {
