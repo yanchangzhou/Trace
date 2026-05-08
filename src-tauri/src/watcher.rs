@@ -1,5 +1,5 @@
 use anyhow::Result;
-use notify::{Event, EventKind, RecursiveMode, Watcher};
+use notify::{EventKind, RecursiveMode, Watcher};
 use notify_debouncer_full::{new_debouncer, DebounceEventResult};
 use std::path::Path;
 use std::sync::Arc;
@@ -7,17 +7,14 @@ use std::time::Duration;
 
 use crate::search::SearchEngine;
 
-/// File watcher that monitors a directory and updates the search index
 pub struct FileWatcher {
     _debouncer: notify_debouncer_full::Debouncer<notify::RecommendedWatcher, notify_debouncer_full::FileIdMap>,
 }
 
 impl FileWatcher {
-    /// Create a new file watcher for the given directory
     pub fn new(watch_path: &Path, search_engine: Arc<SearchEngine>) -> Result<Self> {
         let watch_path = watch_path.to_path_buf();
-        
-        // Create debouncer to avoid processing rapid file changes
+
         let watch_path_clone = watch_path.clone();
         let mut debouncer = new_debouncer(
             Duration::from_millis(500),
@@ -30,7 +27,7 @@ impl FileWatcher {
                             match &ev.kind {
                                 EventKind::Create(_) | EventKind::Modify(_) => {
                                     for path in &ev.paths {
-                                        if path.is_file() {
+                                        if path.is_file() && !is_hidden(path) {
                                             println!("Indexing/Updating file: {:?}", path);
                                             if let Err(e) = search_engine.index_file(path) {
                                                 eprintln!("Failed to index file: {}", e);
@@ -39,52 +36,20 @@ impl FileWatcher {
                                                 eprintln!("Failed to commit index: {}", e);
                                             }
 
-                                            // Spawn async task to sync DB
+                                            // Spawn DB sync on a separate thread with its own tokio runtime
                                             let watch_path_async = watch_path_clone.clone();
                                             let path_async = path.clone();
-                                            tauri::async_runtime::spawn(async move {
-                                                let mut db_path = watch_path_async.clone();
-                                                db_path.push("trace.db");
-                                                let db_url = format!("sqlite://{}", db_path.to_string_lossy());
-                                                match crate::db::Database::new(&db_url).await {
-                                                    Ok(db) => {
-                                                        // Determine book by first path component
-                                                        if let Ok(rel) = path_async.strip_prefix(&watch_path_async) {
-                                                            if let Some(first_comp) = rel.components().next() {
-                                                                let folder_name = first_comp.as_os_str().to_string_lossy().to_string();
-                                                                // Try to find or create book
-                                                                let existing = sqlx::query!("SELECT id FROM books WHERE name = ?", folder_name)
-                                                                    .fetch_optional(&db.pool)
-                                                                    .await;
-                                                                let book_id: i64 = match existing {
-                                                                    Ok(Some(r)) => r.id,
-                                                                    _ => {
-                                                                        let now = chrono::Utc::now().to_rfc3339();
-                                                                        match sqlx::query("INSERT INTO books (name, created_at, updated_at) VALUES (?, ?, ?)")
-                                                                            .bind(&folder_name)
-                                                                            .bind(&now)
-                                                                            .bind(&now)
-                                                                            .execute(&db.pool)
-                                                                            .await {
-                                                                            Ok(rr) => rr.last_insert_rowid(),
-                                                                            Err(_) => 0,
-                                                                        }
-                                                                    }
-                                                                };
-
-                                                                // Sync single file record
-                                                                if let Ok(meta) = std::fs::metadata(&path_async) {
-                                                                    let size = meta.len() as i64;
-                                                                    let ext = path_async.extension().and_then(|e| e.to_str()).unwrap_or("").to_string();
-                                                                    if let Err(e) = db.sync_files_for_book(book_id, vec![(path_async.to_string_lossy().to_string(), size, ext)]) .await {
-                                                                        eprintln!("DB sync error: {:?}", e);
-                                                                    }
-                                                                }
-                                                            }
-                                                        }
+                                            std::thread::spawn(move || {
+                                                let rt = match tokio::runtime::Runtime::new() {
+                                                    Ok(rt) => rt,
+                                                    Err(e) => {
+                                                        eprintln!("Failed to create runtime: {:?}", e);
+                                                        return;
                                                     }
-                                                    Err(e) => eprintln!("Failed to open DB: {:?}", e),
-                                                }
+                                                };
+                                                rt.block_on(async {
+                                                    sync_file_to_db(&watch_path_async, &path_async).await;
+                                                });
                                             });
                                         }
                                     }
@@ -99,21 +64,19 @@ impl FileWatcher {
                                             eprintln!("Commit failed: {}", e);
                                         }
 
-                                        // Remove DB records asynchronously
                                         let watch_path_async = watch_path_clone.clone();
                                         let path_async = path.clone();
-                                        tauri::async_runtime::spawn(async move {
-                                            let mut db_path = watch_path_async.clone();
-                                            db_path.push("trace.db");
-                                            let db_url = format!("sqlite://{}", db_path.to_string_lossy());
-                                            match crate::db::Database::new(&db_url).await {
-                                                Ok(db) => {
-                                                    if let Err(e) = db.delete_file_by_path(&path_async.to_string_lossy()).await {
-                                                        eprintln!("Failed to delete file record: {:?}", e);
-                                                    }
+                                        std::thread::spawn(move || {
+                                            let rt = match tokio::runtime::Runtime::new() {
+                                                Ok(rt) => rt,
+                                                Err(e) => {
+                                                    eprintln!("Failed to create runtime: {:?}", e);
+                                                    return;
                                                 }
-                                                Err(e) => eprintln!("Failed to open DB: {:?}", e),
-                                            }
+                                            };
+                                            rt.block_on(async {
+                                                remove_file_from_db(&watch_path_async, &path_async).await;
+                                            });
                                         });
                                     }
                                 }
@@ -129,54 +92,98 @@ impl FileWatcher {
                 }
             },
         )?;
-        
-        // Start watching the directory
+
         debouncer
             .watcher()
             .watch(&watch_path, RecursiveMode::Recursive)?;
-        
+
         println!("Started watching: {:?}", watch_path);
-        
+
         Ok(Self {
             _debouncer: debouncer,
         })
     }
 }
 
-/// Handle individual file system events
-fn handle_file_event(event: &Event, search_engine: &SearchEngine) -> Result<()> {
-    match &event.kind {
-        EventKind::Create(_) => {
-            // File created - add to index
-            for path in &event.paths {
-                if path.is_file() {
-                    println!("Indexing new file: {:?}", path);
-                    search_engine.index_file(path)?;
-                    search_engine.commit()?;
-                }
-            }
+fn is_hidden(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.starts_with('.') || n.starts_with('~') || n == "trace.db")
+        .unwrap_or(false)
+}
+
+async fn sync_file_to_db(watch_path: &Path, file_path: &Path) {
+    let mut db_path = watch_path.to_path_buf();
+    db_path.push("trace.db");
+    let db_url = format!("sqlite://{}", db_path.to_string_lossy());
+
+    let db = match crate::db::Database::new(&db_url).await {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("Failed to open DB: {:?}", e);
+            return;
         }
-        EventKind::Modify(_) => {
-            // File modified - re-index
-            for path in &event.paths {
-                if path.is_file() {
-                    println!("Re-indexing modified file: {:?}", path);
-                    search_engine.remove_file(path)?;
-                    search_engine.index_file(path)?;
-                    search_engine.commit()?;
-                }
-            }
-        }
-        EventKind::Remove(_) => {
-            // File removed - remove from index
-            for path in &event.paths {
-                println!("Removing file from index: {:?}", path);
-                search_engine.remove_file(path)?;
-                search_engine.commit()?;
-            }
-        }
-        _ => {}
+    };
+
+    // Determine book by first path component
+    let rel = match file_path.strip_prefix(watch_path) {
+        Ok(r) => r,
+        Err(_) => return,
+    };
+
+    let first_comp = match rel.components().next() {
+        Some(c) => c.as_os_str().to_string_lossy().to_string(),
+        None => return,
+    };
+
+    if first_comp.is_empty() {
+        return;
     }
-    
-    Ok(())
+
+    // Find or create book
+    let books = match db.list_books().await {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+
+    let book_id: i64 = if let Some(book) = books.iter().find(|b| b.name == first_comp) {
+        book.id
+    } else {
+        let now = chrono::Utc::now().to_rfc3339();
+        match db.create_book(&first_comp, &now).await {
+            Ok(id) => id,
+            Err(_) => return,
+        }
+    };
+
+    // Sync file record
+    if let Ok(meta) = std::fs::metadata(file_path) {
+        let size = meta.len() as i64;
+        let ext = file_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("")
+            .to_string();
+        if let Err(e) = db.sync_files_for_book(book_id, vec![(file_path.to_string_lossy().to_string(), size, ext)]).await {
+            eprintln!("DB sync error: {:?}", e);
+        }
+    }
+}
+
+async fn remove_file_from_db(watch_path: &Path, file_path: &Path) {
+    let mut db_path = watch_path.to_path_buf();
+    db_path.push("trace.db");
+    let db_url = format!("sqlite://{}", db_path.to_string_lossy());
+
+    let db = match crate::db::Database::new(&db_url).await {
+        Ok(db) => db,
+        Err(e) => {
+            eprintln!("Failed to open DB: {:?}", e);
+            return;
+        }
+    };
+
+    if let Err(e) = db.delete_file_by_path(&file_path.to_string_lossy()).await {
+        eprintln!("Failed to delete file record: {:?}", e);
+    }
 }

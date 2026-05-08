@@ -34,6 +34,9 @@
     "react-dom": "^19.0.0",
     "react-pdf": "^10.4.1"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["sharp", "unrs-resolver"]
+  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.1.0",
     "@types/node": "^22",

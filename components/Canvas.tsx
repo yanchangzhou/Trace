@@ -18,10 +18,15 @@ import {
   Check,
   Highlighter,
   Palette,
+  Plus,
+  FileText,
+  X,
+  Loader2,
 } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useFilePreview } from '@/contexts/FilePreviewContext';
+import { useBook } from '@/contexts/BookContext';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
 import StarterKit from '@tiptap/starter-kit';
@@ -31,6 +36,15 @@ import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
 import BubbleMenuExtension from '@tiptap/extension-bubble-menu';
+import {
+  createNote,
+  updateNote,
+  getNote,
+  listNotesByBook,
+  buildAiContext,
+  generateWithContext,
+  type Note,
+} from '@/lib/tauri';
 
 const springConfig = {
   type: 'spring' as const,
@@ -42,10 +56,25 @@ export default function Canvas() {
   const [plainText, setPlainText] = useState('');
   const { sidebarWidth } = useSidebar();
   const { previewWidth } = useFilePreview();
+  const { currentBook, isTauri } = useBook();
   const [showColorPanel, setShowColorPanel] = useState(false);
   const [showHighlightPanel, setShowHighlightPanel] = useState(false);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
   const bubbleRef = useRef<HTMLDivElement | null>(null);
+
+  // ── Note state ──
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [currentNoteId, setCurrentNoteId] = useState<number | null>(null);
+  const [currentNoteTitle, setCurrentNoteTitle] = useState('Untitled');
+  const [showNoteList, setShowNoteList] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [lastSaved, setLastSaved] = useState<string | null>(null);
+  const [showAiModal, setShowAiModal] = useState(false);
+  const [aiPrompt, setAiPrompt] = useState('');
+  const [aiResult, setAiResult] = useState('');
+  const [isAiLoading, setIsAiLoading] = useState(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isNewNoteRef = useRef(false);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -68,7 +97,7 @@ export default function Canvas() {
         },
       }),
     ],
-    content: '<p></p>',
+    content: '',
     editorProps: {
       attributes: {
         class:
@@ -76,9 +105,204 @@ export default function Canvas() {
       },
     },
     onUpdate: ({ editor: e }) => {
-      setPlainText(e.getText());
+      const text = e.getText();
+      setPlainText(text);
+      // Debounced auto-save
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+      saveTimerRef.current = setTimeout(() => {
+        saveCurrentNote(e.getHTML(), text);
+      }, 1500);
     },
   });
+
+  // ── Load notes for current book ──
+  useEffect(() => {
+    if (!currentBook) return;
+    const loadNotes = async () => {
+      if (!isTauri) {
+        // Browser mode: no persistence
+        setNotes([]);
+        setCurrentNoteId(null);
+        return;
+      }
+      try {
+        // Map frontend book id to backend book id
+        const bookId = Number(currentBook.id);
+        if (isNaN(bookId)) {
+          setNotes([]);
+          return;
+        }
+        const bookNotes = await listNotesByBook(bookId);
+        setNotes(bookNotes);
+        if (bookNotes.length > 0 && currentNoteId == null) {
+          // Auto-select first note
+          const note = bookNotes[0];
+          setCurrentNoteId(note.id);
+          setCurrentNoteTitle(note.title);
+          editor?.commands.setContent(note.content_json);
+        }
+      } catch (error) {
+        console.error('Failed to load notes:', error);
+      }
+    };
+    loadNotes();
+  }, [currentBook, isTauri]);
+
+  // ── Save current note ──
+  const saveCurrentNote = useCallback(
+    async (html: string, text: string) => {
+      if (!isTauri || !currentBook) return;
+
+      const bookId = Number(currentBook.id);
+      if (isNaN(bookId)) return;
+
+      try {
+        setIsSaving(true);
+        if (currentNoteId != null && !isNewNoteRef.current) {
+          // Update existing note
+          const note: Note = {
+            id: currentNoteId,
+            book_id: bookId,
+            title: currentNoteTitle,
+            content_json: html,
+            plain_text: text,
+            created_at: '',
+            updated_at: new Date().toISOString(),
+          };
+          await updateNote(note);
+        } else if (currentNoteId != null && isNewNoteRef.current) {
+          // Update the just-created note (use update instead of create again)
+          isNewNoteRef.current = false;
+          const note: Note = {
+            id: currentNoteId,
+            book_id: bookId,
+            title: currentNoteTitle,
+            content_json: html,
+            plain_text: text,
+            created_at: '',
+            updated_at: new Date().toISOString(),
+          };
+          await updateNote(note);
+        }
+        setLastSaved(new Date().toLocaleTimeString());
+      } catch (error) {
+        console.error('Failed to save note:', error);
+      } finally {
+        setIsSaving(false);
+      }
+    },
+    [isTauri, currentBook, currentNoteId, currentNoteTitle]
+  );
+
+  // ── Create new note ──
+  const handleNewNote = async () => {
+    if (!isTauri || !currentBook) return;
+
+    const bookId = Number(currentBook.id);
+    if (isNaN(bookId)) return;
+
+    // Save current note first
+    if (currentNoteId != null && editor) {
+      const html = editor.getHTML();
+      const text = editor.getText();
+      await saveCurrentNote(html, text);
+    }
+
+    try {
+      const title = `Note ${notes.length + 1}`;
+      const now = new Date().toISOString();
+      const newId = await createNote(bookId, title, '<p></p>', '');
+
+      // Refresh note list
+      const bookNotes = await listNotesByBook(bookId);
+      setNotes(bookNotes);
+
+      setCurrentNoteId(newId);
+      setCurrentNoteTitle(title);
+      isNewNoteRef.current = true;
+      editor?.commands.setContent('<p></p>');
+      setLastSaved(null);
+    } catch (error) {
+      console.error('Failed to create note:', error);
+    }
+  };
+
+  // ── Select a note ──
+  const handleSelectNote = async (noteId: number) => {
+    // Save current note first
+    if (currentNoteId != null && editor && !isNewNoteRef.current) {
+      const html = editor.getHTML();
+      const text = editor.getText();
+      await saveCurrentNote(html, text);
+    }
+
+    if (isTauri) {
+      try {
+        const note = await getNote(noteId);
+        setCurrentNoteId(note.id);
+        setCurrentNoteTitle(note.title);
+        isNewNoteRef.current = false;
+        editor?.commands.setContent(note.content_json || '<p></p>');
+        setLastSaved(null);
+      } catch (error) {
+        console.error('Failed to load note:', error);
+      }
+    }
+    setShowNoteList(false);
+  };
+
+  // ── AI Assist ──
+  const handleAiAssist = async () => {
+    if (!isTauri) {
+      alert('AI Assist requires the Tauri desktop app with notes and sources configured.');
+      return;
+    }
+    if (!currentNoteId) {
+      // Create a note first if none exists
+      await handleNewNote();
+    }
+
+    setShowAiModal(true);
+    setAiPrompt('');
+    setAiResult('');
+
+    // Pre-build context
+    if (currentNoteId != null) {
+      try {
+        const context = await buildAiContext(currentNoteId);
+        if (context.trim()) {
+          setAiPrompt(`Use the following source materials:\n\n${context}`);
+        }
+      } catch {
+        // no sources yet
+      }
+    }
+  };
+
+  const handleGenerate = async () => {
+    if (!currentNoteId || !aiPrompt.trim() || !isTauri) return;
+
+    setIsAiLoading(true);
+    setAiResult('');
+
+    try {
+      const result = await generateWithContext(currentNoteId, aiPrompt);
+      setAiResult(result);
+    } catch (error) {
+      console.error('AI generation failed:', error);
+      setAiResult('Error: Failed to generate. Make sure sources are attached to this note.');
+    } finally {
+      setIsAiLoading(false);
+    }
+  };
+
+  const handleInsertAiResult = () => {
+    if (editor && aiResult) {
+      editor.commands.insertContent(aiResult);
+      setShowAiModal(false);
+      setAiResult('');
+    }
+  };
 
   const wordCount = useMemo(() => plainText.split(/\s+/).filter(Boolean).length, [plainText]);
 
@@ -95,7 +319,7 @@ export default function Canvas() {
   const applyLink = () => {
     if (!editor) return;
     const previous = editor.getAttributes('link').href as string | undefined;
-    const url = window.prompt('输入链接地址 (https://...)', previous || 'https://');
+    const url = window.prompt('Link URL (https://...)', previous || 'https://');
     if (url === null) return;
     if (url.trim() === '') {
       editor.chain().focus().unsetLink().run();
@@ -106,13 +330,6 @@ export default function Canvas() {
 
   const textColors = ['#2F3437', '#787774', '#9F6B53', '#7A5E3B', '#4F7A57', '#4D6461', '#5B6EAE', '#8B5CF6'];
   const highlightColors = ['#FFF3BF', '#FFE3E3', '#D3F9D8', '#D0EBFF', '#E5DBFF', '#FFE8CC'];
-  const currentHeadingLabel = editor?.isActive('heading', { level: 1 })
-    ? 'H1'
-    : editor?.isActive('heading', { level: 2 })
-      ? 'H2'
-      : editor?.isActive('heading', { level: 3 })
-        ? 'H3'
-        : 'Text';
 
   const turnIntoLabel = editor?.isActive('bulletList')
     ? 'Bulleted list'
@@ -120,9 +337,13 @@ export default function Canvas() {
       ? 'Numbered list'
       : editor?.isActive('codeBlock')
         ? 'Code block'
-        : currentHeadingLabel === 'Text'
-          ? 'Text'
-          : currentHeadingLabel;
+        : editor?.isActive('heading', { level: 1 })
+          ? 'H1'
+          : editor?.isActive('heading', { level: 2 })
+            ? 'H2'
+            : editor?.isActive('heading', { level: 3 })
+              ? 'H3'
+              : 'Text';
 
   const setBlockType = (type: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'codeBlock') => {
     if (!editor) return;
@@ -148,8 +369,6 @@ export default function Canvas() {
         break;
       case 'codeBlock':
         chain.toggleCodeBlock().run();
-        break;
-      default:
         break;
     }
     setShowHeadingMenu(false);
@@ -188,7 +407,6 @@ export default function Canvas() {
     }`;
 
   const keepSelectionOnMouseDown = (e: React.MouseEvent) => {
-    // Prevent editor blur when clicking bubble controls, otherwise selection is lost.
     e.preventDefault();
   };
 
@@ -200,11 +418,40 @@ export default function Canvas() {
       }}
       className="fixed left-0 right-0 top-12 bottom-0 bg-background-light dark:bg-background-dark overflow-auto"
     >
-      <motion.div 
+      <motion.div
         initial={{ opacity: 0, y: 20 }}
         animate={{ opacity: 1, y: 0 }}
         className="max-w-4xl mx-auto px-8 py-12"
       >
+        {/* Note Tabs Bar */}
+        {isTauri && (
+          <div className="flex items-center gap-2 mb-6">
+            <div className="flex-1 flex items-center gap-1 overflow-x-auto">
+              {notes.map((note) => (
+                <button
+                  key={note.id}
+                  onClick={() => handleSelectNote(note.id)}
+                  className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm whitespace-nowrap transition-colors ${
+                    currentNoteId === note.id
+                      ? 'bg-accent-warm/15 text-accent-warm font-medium'
+                      : 'hover:bg-card-light dark:hover:bg-card-dark text-text-secondary-light dark:text-text-secondary-dark'
+                  }`}
+                >
+                  <FileText className="w-3.5 h-3.5" />
+                  {note.title}
+                </button>
+              ))}
+            </div>
+            <button
+              onClick={handleNewNote}
+              className="flex items-center gap-1 px-3 py-2 rounded-lg bg-accent-warm/10 text-accent-warm hover:bg-accent-warm/20 transition-colors text-sm font-medium"
+            >
+              <Plus className="w-4 h-4" />
+              New Note
+            </button>
+          </div>
+        )}
+
         {/* Writing Area */}
         <motion.div
           initial={{ y: 20, opacity: 0 }}
@@ -360,7 +607,6 @@ export default function Canvas() {
 
           <EditorContent
             editor={editor}
-            placeholder="Start writing your thoughts..."
             className="
               [&_.ProseMirror]:outline-none
               [&_.ProseMirror_p]:my-2
@@ -376,16 +622,31 @@ export default function Canvas() {
           />
         </motion.div>
 
-        <div className="flex justify-end mt-4">
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span className="text-sm font-medium tracking-tight">AI Assist</span>
-          </motion.button>
+        {/* Action Buttons */}
+        <div className="flex justify-end mt-4 gap-3">
+          {isTauri && currentNoteId && (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              onClick={handleAiAssist}
+              className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="text-sm font-medium tracking-tight">AI Assist</span>
+            </motion.button>
+          )}
+          {!isTauri && (
+            <motion.button
+              whileHover={{ scale: 1.05 }}
+              whileTap={{ scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
+              className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="text-sm font-medium tracking-tight">AI Assist</span>
+            </motion.button>
+          )}
         </div>
 
         {/* Stats Footer */}
@@ -398,12 +659,109 @@ export default function Canvas() {
           <div className="flex items-center gap-4">
             <span>{wordCount} words</span>
             <span>{plainText.length} characters</span>
+            {isSaving && (
+              <span className="text-accent-warm animate-pulse">Saving...</span>
+            )}
           </div>
           <div>
-            <span>Last saved: Just now</span>
+            <span>
+              {lastSaved ? `Last saved: ${lastSaved}` : '---'}
+            </span>
           </div>
         </motion.div>
       </motion.div>
+
+      {/* AI Assist Modal */}
+      <AnimatePresence>
+        {showAiModal && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]"
+            onClick={() => setShowAiModal(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              transition={{ type: 'spring', stiffness: 260, damping: 20 }}
+              onClick={(e) => e.stopPropagation()}
+              className="bg-surface-light dark:bg-surface-dark rounded-squircle-lg p-8 w-full max-w-2xl mx-4 shadow-ambient-lg dark:shadow-ambient-lg-dark max-h-[80vh] overflow-y-auto"
+            >
+              <div className="flex items-center justify-between mb-6">
+                <h2 className="text-lg font-semibold text-text-primary-light dark:text-text-primary-dark flex items-center gap-2">
+                  <Sparkles className="w-5 h-5 text-accent-warm" />
+                  AI Writing Assistant
+                </h2>
+                <button
+                  onClick={() => setShowAiModal(false)}
+                  className="w-8 h-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center"
+                >
+                  <X className="w-4 h-4 text-text-secondary-light dark:text-text-secondary-dark" />
+                </button>
+              </div>
+
+              {/* Prompt Input */}
+              <div className="mb-4">
+                <label className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark mb-2 block">
+                  What do you want to write about?
+                </label>
+                <textarea
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  placeholder="Describe what you want the AI to help with..."
+                  rows={4}
+                  className="w-full px-4 py-3 rounded-squircle bg-background-light dark:bg-background-dark text-text-primary-light dark:text-text-primary-dark placeholder-text-tertiary-light dark:placeholder-text-tertiary-dark border border-border-light dark:border-border-dark focus:outline-none focus:ring-2 focus:ring-accent-warm resize-none"
+                />
+              </div>
+
+              {/* Generate Button */}
+              <button
+                onClick={handleGenerate}
+                disabled={isAiLoading || !aiPrompt.trim()}
+                className="w-full py-3 rounded-squircle bg-accent-warm text-white font-medium hover:bg-accent-warm/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+              >
+                {isAiLoading ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    Generating...
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    Generate
+                  </>
+                )}
+              </button>
+
+              {/* Result */}
+              {aiResult && (
+                <motion.div
+                  initial={{ opacity: 0, y: 10 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  className="mt-6"
+                >
+                  <div className="flex items-center justify-between mb-3">
+                    <h3 className="text-sm font-semibold text-text-primary-light dark:text-text-primary-dark">
+                      Generated Response
+                    </h3>
+                    <button
+                      onClick={handleInsertAiResult}
+                      className="px-3 py-1.5 rounded-lg bg-accent-warm/10 text-accent-warm text-sm font-medium hover:bg-accent-warm/20 transition-colors"
+                    >
+                      Insert into Editor
+                    </button>
+                  </div>
+                  <div className="bg-card-light dark:bg-card-dark rounded-squircle p-4 text-sm text-text-primary-light dark:text-text-primary-dark leading-relaxed whitespace-pre-wrap">
+                    {aiResult}
+                  </div>
+                </motion.div>
+              )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </main>
   );
 }

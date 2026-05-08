@@ -2,6 +2,17 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
 import { Book, SourceFile } from '@/types';
+import {
+  listBooks,
+  createBook as createBookTauri,
+  renameBook as renameBookTauri,
+  deleteBook as deleteBookTauri,
+  listFilesByBook,
+  listBookFiles,
+  syncLibrary,
+  type Book as TauriBook,
+  type FileRecord,
+} from '@/lib/tauri';
 
 interface BookContextType {
   books: Book[];
@@ -13,6 +24,10 @@ interface BookContextType {
   addFileToBook: (bookId: string, file: SourceFile) => void;
   removeFileFromBook: (bookId: string, fileId: string) => void;
   getFilesForCurrentBook: () => SourceFile[];
+  refreshFiles: () => Promise<void>;
+  isTauri: boolean;
+  /** Map from frontend book id → backend i64 id */
+  bookIdMap: Map<string, number>;
 }
 
 const BookContext = createContext<BookContextType | undefined>(undefined);
@@ -20,32 +35,119 @@ const BookContext = createContext<BookContextType | undefined>(undefined);
 const STORAGE_KEY = 'trace_books';
 const CURRENT_BOOK_KEY = 'trace_current_book';
 
+function generateId(): string {
+  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+}
+
+/** Convert Tauri Book (i64 id) to frontend Book (string id) */
+function tauriBookToBook(tb: TauriBook): Book {
+  return {
+    id: String(tb.id),
+    name: tb.name,
+    createdAt: new Date(tb.created_at).getTime(),
+    files: [],
+  };
+}
+
+/** Convert Tauri FileRecord to frontend SourceFile */
+function fileRecordToSourceFile(fr: FileRecord): SourceFile {
+  return {
+    id: String(fr.id),
+    name: fr.name,
+    path: fr.path,
+    extension: fr.extension,
+    bookId: String(fr.book_id),
+    addedAt: new Date(fr.created_at).getTime(),
+  };
+}
+
 export function BookProvider({ children }: { children: ReactNode }) {
   const [books, setBooks] = useState<Book[]>([]);
   const [currentBook, setCurrentBook] = useState<Book | null>(null);
-  // Store File objects separately (can't be serialized to localStorage)
   const [fileObjects, setFileObjects] = useState<Map<string, File>>(new Map());
+  const [bookIdMap, setBookIdMap] = useState<Map<string, number>>(new Map());
+  const [isTauri, setIsTauri] = useState(false);
 
-  // Load books from localStorage on mount
+  // Detect Tauri environment
   useEffect(() => {
-    const loadBooks = () => {
+    try {
+      if (typeof window !== 'undefined' && (window as any).__TAURI__) {
+        setIsTauri(true);
+      }
+    } catch {
+      // browser mode
+    }
+  }, []);
+
+  // Load books from Tauri backend or localStorage
+  useEffect(() => {
+    const loadFromTauri = async () => {
+      try {
+        const tauriBooks = await listBooks();
+        if (tauriBooks.length === 0) {
+          // Create a default book
+          const newId = await createBookTauri('My First Book');
+          const frontendBook: Book = {
+            id: String(newId),
+            name: 'My First Book',
+            createdAt: Date.now(),
+            files: [],
+          };
+          setBooks([frontendBook]);
+          setCurrentBook(frontendBook);
+          setBookIdMap(new Map([[String(newId), newId]]));
+          return;
+        }
+
+        const frontendBooks: Book[] = tauriBooks.map(tauriBookToBook);
+        const idMap = new Map<string, number>();
+        tauriBooks.forEach((tb) => idMap.set(String(tb.id), tb.id));
+
+        setBooks(frontendBooks);
+        setBookIdMap(idMap);
+
+        // Load current book from localStorage, or use first
+        const savedBookId = localStorage.getItem(CURRENT_BOOK_KEY);
+        const target = savedBookId
+          ? frontendBooks.find((b) => b.id === savedBookId)
+          : frontendBooks[0];
+        setCurrentBook(target || frontendBooks[0]);
+
+        // Load files for each book
+        for (const book of frontendBooks) {
+          const backendId = idMap.get(book.id);
+          if (backendId != null) {
+            try {
+              const files = await listFilesByBook(backendId);
+              book.files = files.map(fileRecordToSourceFile);
+            } catch {
+              // book might have no files
+            }
+          }
+        }
+        setBooks([...frontendBooks]);
+      } catch (error) {
+        console.error('Failed to load from Tauri backend, falling back to localStorage:', error);
+        loadFromLocalStorage();
+      }
+    };
+
+    const loadFromLocalStorage = () => {
       try {
         const stored = localStorage.getItem(STORAGE_KEY);
         const currentBookId = localStorage.getItem(CURRENT_BOOK_KEY);
-        
+
         if (stored) {
           const loadedBooks: Book[] = JSON.parse(stored);
           setBooks(loadedBooks);
-          
-          // Set current book
+
           if (currentBookId) {
-            const book = loadedBooks.find(b => b.id === currentBookId);
+            const book = loadedBooks.find((b) => b.id === currentBookId);
             setCurrentBook(book || loadedBooks[0] || null);
           } else {
             setCurrentBook(loadedBooks[0] || null);
           }
         } else {
-          // Create default book for first-time users
           const defaultBook: Book = {
             id: generateId(),
             name: 'My First Book',
@@ -58,175 +160,256 @@ export function BookProvider({ children }: { children: ReactNode }) {
           localStorage.setItem(CURRENT_BOOK_KEY, defaultBook.id);
         }
       } catch (error) {
-        console.error('Failed to load books:', error);
+        console.error('Failed to load books from localStorage:', error);
       }
     };
 
-    loadBooks();
-  }, []);
+    if (isTauri) {
+      loadFromTauri();
+    } else {
+      loadFromLocalStorage();
+    }
+  }, [isTauri]);
 
-  // Save books to localStorage whenever they change
+  // Save books to localStorage (for browser mode fallback)
   useEffect(() => {
-    if (books.length > 0) {
-      // Remove File objects before saving to localStorage (they can't be serialized)
-      const booksToSave = books.map(book => ({
+    if (!isTauri && books.length > 0) {
+      const booksToSave = books.map((book) => ({
         ...book,
-        files: book.files.map(file => {
+        files: book.files.map((file) => {
           const { file: _, ...fileWithoutBlob } = file;
           return fileWithoutBlob;
         }),
       }));
       localStorage.setItem(STORAGE_KEY, JSON.stringify(booksToSave));
     }
-  }, [books]);
+  }, [books, isTauri]);
 
-  // Save current book ID whenever it changes
+  // Save current book ID
   useEffect(() => {
     if (currentBook) {
       localStorage.setItem(CURRENT_BOOK_KEY, currentBook.id);
     }
   }, [currentBook]);
 
-  const createBook = useCallback((name: string) => {
-    const newBook: Book = {
-      id: generateId(),
-      name,
-      createdAt: Date.now(),
-      files: [],
-    };
-    
-    setBooks(prev => [...prev, newBook]);
-    setCurrentBook(newBook);
-    
-    // Create book folder via Tauri
-    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
-      const { invoke } = (window as any).__TAURI__;
-      invoke('create_book_folder', { bookId: newBook.id }).catch((error: any) => {
-        console.error('Failed to create book folder:', error);
-      });
-    }
-  }, []);
-
-  const selectBook = useCallback((bookId: string) => {
-    const book = books.find(b => b.id === bookId);
-    if (book) {
-      setCurrentBook(book);
-    }
-  }, [books]);
-
-  const deleteBook = useCallback((bookId: string) => {
-    // Don't allow deleting the last book
-    if (books.length <= 1) {
-      return;
-    }
-    
-    setBooks(prev => prev.filter(b => b.id !== bookId));
-    
-    // If deleting current book, select another one
-    if (currentBook?.id === bookId) {
-      const remainingBooks = books.filter(b => b.id !== bookId);
-      setCurrentBook(remainingBooks[0] || null);
-    }
-    
-    // Delete book folder via Tauri
-    if (typeof window !== 'undefined' && (window as any).__TAURI__) {
-      const { invoke } = (window as any).__TAURI__;
-      invoke('delete_book_folder', { bookId }).catch((error: any) => {
-        console.error('Failed to delete book folder:', error);
-      });
-    }
-  }, [books, currentBook]);
-
-  const renameBook = useCallback((bookId: string, newName: string) => {
-    setBooks(prev => prev.map(book => {
-      if (book.id === bookId) {
-        return { ...book, name: newName };
+  const createBook = useCallback(
+    async (name: string) => {
+      if (isTauri) {
+        try {
+          const newId = await createBookTauri(name);
+          const newBook: Book = {
+            id: String(newId),
+            name,
+            createdAt: Date.now(),
+            files: [],
+          };
+          setBooks((prev) => [...prev, newBook]);
+          setCurrentBook(newBook);
+          setBookIdMap((prev) => new Map(prev).set(String(newId), newId));
+        } catch (error) {
+          console.error('Failed to create book via Tauri:', error);
+        }
+      } else {
+        const newBook: Book = {
+          id: generateId(),
+          name,
+          createdAt: Date.now(),
+          files: [],
+        };
+        setBooks((prev) => [...prev, newBook]);
+        setCurrentBook(newBook);
       }
-      return book;
-    }));
-    
-    // Update current book if it's the one being renamed
-    if (currentBook?.id === bookId) {
-      setCurrentBook(prev => prev ? { ...prev, name: newName } : null);
-    }
-  }, [currentBook]);
+    },
+    [isTauri]
+  );
 
-  const addFileToBook = useCallback((bookId: string, file: SourceFile) => {
-    // Store File object separately if it exists
-    if (file.file) {
-      setFileObjects(prev => {
+  const selectBook = useCallback(
+    (bookId: string) => {
+      const book = books.find((b) => b.id === bookId);
+      if (book) {
+        setCurrentBook(book);
+      }
+    },
+    [books]
+  );
+
+  const deleteBook = useCallback(
+    async (bookId: string) => {
+      if (books.length <= 1) return;
+
+      const backendId = bookIdMap.get(bookId);
+      if (isTauri && backendId != null) {
+        try {
+          await deleteBookTauri(backendId);
+        } catch (error) {
+          console.error('Failed to delete book via Tauri:', error);
+        }
+      }
+
+      setBooks((prev) => prev.filter((b) => b.id !== bookId));
+
+      if (currentBook?.id === bookId) {
+        const remainingBooks = books.filter((b) => b.id !== bookId);
+        setCurrentBook(remainingBooks[0] || null);
+      }
+    },
+    [books, currentBook, isTauri, bookIdMap]
+  );
+
+  const renameBook = useCallback(
+    async (bookId: string, newName: string) => {
+      const backendId = bookIdMap.get(bookId);
+      if (isTauri && backendId != null) {
+        try {
+          await renameBookTauri(backendId, newName);
+        } catch (error) {
+          console.error('Failed to rename book via Tauri:', error);
+        }
+      }
+
+      setBooks((prev) =>
+        prev.map((book) => {
+          if (book.id === bookId) {
+            return { ...book, name: newName };
+          }
+          return book;
+        })
+      );
+
+      if (currentBook?.id === bookId) {
+        setCurrentBook((prev) => (prev ? { ...prev, name: newName } : null));
+      }
+    },
+    [currentBook, isTauri, bookIdMap]
+  );
+
+  const addFileToBook = useCallback(
+    (bookId: string, file: SourceFile) => {
+      if (file.file) {
+        setFileObjects((prev) => {
+          const newMap = new Map(prev);
+          newMap.set(file.id, file.file!);
+          return newMap;
+        });
+      }
+
+      setBooks((prev) =>
+        prev.map((book) => {
+          if (book.id === bookId) {
+            return { ...book, files: [...book.files, file] };
+          }
+          return book;
+        })
+      );
+
+      if (currentBook?.id === bookId) {
+        setCurrentBook((prev) =>
+          prev ? { ...prev, files: [...prev.files, file] } : null
+        );
+      }
+    },
+    [currentBook]
+  );
+
+  const removeFileFromBook = useCallback(
+    (bookId: string, fileId: string) => {
+      setFileObjects((prev) => {
         const newMap = new Map(prev);
-        newMap.set(file.id, file.file!);
+        newMap.delete(fileId);
         return newMap;
       });
-    }
-    
-    setBooks(prev => prev.map(book => {
-      if (book.id === bookId) {
-        return {
-          ...book,
-          files: [...book.files, file],
-        };
-      }
-      return book;
-    }));
-    
-    // Update current book if it's the one being modified
-    if (currentBook?.id === bookId) {
-      setCurrentBook(prev => prev ? {
-        ...prev,
-        files: [...prev.files, file],
-      } : null);
-    }
-  }, [currentBook]);
 
-  const removeFileFromBook = useCallback((bookId: string, fileId: string) => {
-    // Remove File object from map
-    setFileObjects(prev => {
-      const newMap = new Map(prev);
-      newMap.delete(fileId);
-      return newMap;
-    });
-    
-    setBooks(prev => prev.map(book => {
-      if (book.id === bookId) {
-        return {
-          ...book,
-          files: book.files.filter(f => f.id !== fileId),
-        };
+      setBooks((prev) =>
+        prev.map((book) => {
+          if (book.id === bookId) {
+            return { ...book, files: book.files.filter((f) => f.id !== fileId) };
+          }
+          return book;
+        })
+      );
+
+      if (currentBook?.id === bookId) {
+        setCurrentBook((prev) =>
+          prev
+            ? { ...prev, files: prev.files.filter((f) => f.id !== fileId) }
+            : null
+        );
       }
-      return book;
-    }));
-    
-    // Update current book if it's the one being modified
-    if (currentBook?.id === bookId) {
-      setCurrentBook(prev => prev ? {
-        ...prev,
-        files: prev.files.filter(f => f.id !== fileId),
-      } : null);
-    }
-  }, [currentBook]);
+    },
+    [currentBook]
+  );
 
   const getFilesForCurrentBook = useCallback(() => {
     const files = currentBook?.files || [];
-    // Attach File objects from the map
-    return files.map(file => ({
+    return files.map((file) => ({
       ...file,
       file: fileObjects.get(file.id),
     }));
   }, [currentBook, fileObjects]);
 
-  const contextValue = useMemo(() => ({
-    books,
-    currentBook,
-    createBook,
-    selectBook,
-    deleteBook,
-    renameBook,
-    addFileToBook,
-    removeFileFromBook,
-    getFilesForCurrentBook,
-  }), [books, currentBook, createBook, selectBook, deleteBook, renameBook, addFileToBook, removeFileFromBook, getFilesForCurrentBook]);
+  const refreshFiles = useCallback(async () => {
+    if (!isTauri || !currentBook) return;
+    const backendId = bookIdMap.get(currentBook.id);
+    if (backendId == null) return;
+
+    try {
+      const files = await listFilesByBook(backendId);
+
+      // Also try to sync the library if we have a path
+      try {
+        const { getDocsFolder } = await import('@/lib/tauri');
+        const docsFolder = await getDocsFolder();
+        const bookPath = `${docsFolder}/${currentBook.name}`;
+        await syncLibrary(backendId, bookPath);
+      } catch {
+        // sync is best-effort
+      }
+
+      const sourceFiles = files.map(fileRecordToSourceFile);
+      setBooks((prev) =>
+        prev.map((book) => {
+          if (book.id === currentBook.id) {
+            return { ...book, files: sourceFiles };
+          }
+          return book;
+        })
+      );
+      setCurrentBook((prev) => (prev ? { ...prev, files: sourceFiles } : null));
+    } catch (error) {
+      console.error('Failed to refresh files:', error);
+    }
+  }, [isTauri, currentBook, bookIdMap]);
+
+  const contextValue = useMemo(
+    () => ({
+      books,
+      currentBook,
+      createBook,
+      selectBook,
+      deleteBook,
+      renameBook,
+      addFileToBook,
+      removeFileFromBook,
+      getFilesForCurrentBook,
+      refreshFiles,
+      isTauri,
+      bookIdMap,
+    }),
+    [
+      books,
+      currentBook,
+      createBook,
+      selectBook,
+      deleteBook,
+      renameBook,
+      addFileToBook,
+      removeFileFromBook,
+      getFilesForCurrentBook,
+      refreshFiles,
+      isTauri,
+      bookIdMap,
+    ]
+  );
 
   return (
     <BookContext.Provider value={contextValue}>
@@ -241,9 +424,4 @@ export function useBook() {
     throw new Error('useBook must be used within a BookProvider');
   }
   return context;
-}
-
-// Helper function to generate unique IDs
-function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }

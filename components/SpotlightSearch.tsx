@@ -1,9 +1,17 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, File, FileText, Image, Video, Music, X } from 'lucide-react';
+import { Search, File, FileText, Image, Video, Music, X, FileSearch } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import { searchLocalFiles, openFile, formatFileSize, formatDate, type SearchResult } from '@/lib/tauri';
+import {
+  searchLocalFiles,
+  searchDocuments,
+  openFile,
+  formatFileSize,
+  formatDate,
+  type SearchResult,
+  type DocumentSearchResult,
+} from '@/lib/tauri';
 
 const springConfig = {
   type: 'spring' as const,
@@ -11,22 +19,26 @@ const springConfig = {
   damping: 20,
 };
 
+type SearchTab = 'files' | 'content';
+
 interface SpotlightSearchProps {
   isOpen: boolean;
   onClose: () => void;
+  onQuickLook?: (filePath: string) => void;
 }
 
-export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
+export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: SpotlightSearchProps) {
   const [query, setQuery] = useState('');
-  const [results, setResults] = useState<SearchResult[]>([]);
+  const [fileResults, setFileResults] = useState<SearchResult[]>([]);
+  const [contentResults, setContentResults] = useState<DocumentSearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
+  const [activeTab, setActiveTab] = useState<SearchTab>('files');
 
   // Get icon based on file extension
   const getFileIcon = (extension: string) => {
     const ext = extension.toLowerCase();
-    
     if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
       return <FileText className="w-5 h-5" />;
     }
@@ -39,30 +51,56 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
     if (['mp3', 'wav', 'flac', 'm4a'].includes(ext)) {
       return <Music className="w-5 h-5" />;
     }
-    
     return <File className="w-5 h-5" />;
   };
 
-  // Search with debounce
+  // Get icon for content results (from file name)
+  const getContentIcon = (fileName: string) => {
+    const ext = fileName.split('.').pop()?.toLowerCase() || '';
+    if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
+      return <FileSearch className="w-5 h-5" />;
+    }
+    return <FileText className="w-5 h-5" />;
+  };
+
+  // Get total result count based on active tab
+  const totalResults = activeTab === 'files' ? fileResults.length : contentResults.length;
+
+  // Flat list of all results for keyboard navigation
+  const allResults = activeTab === 'files'
+    ? fileResults.map((r, i) => ({ type: 'file' as const, index: i, path: r.path }))
+    : contentResults.map((r, i) => ({ type: 'content' as const, index: i, path: r.file_id }));
+
+  // Search with debounce — both file names and content
   useEffect(() => {
     if (!query.trim()) {
-      setResults([]);
+      setFileResults([]);
+      setContentResults([]);
       return;
     }
 
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const searchResults = await searchLocalFiles(query);
-        setResults(searchResults);
+        const [fileRes, contentRes] = await Promise.all([
+          searchLocalFiles(query).catch(() => [] as SearchResult[]),
+          searchDocuments(query, undefined, 20).catch(() => [] as DocumentSearchResult[]),
+        ]);
+        setFileResults(fileRes);
+        setContentResults(contentRes);
         setSelectedIndex(0);
+        // Auto-switch to content tab if files are empty
+        if (fileRes.length === 0 && contentRes.length > 0) {
+          setActiveTab('content');
+        }
       } catch (error) {
         console.error('Search error:', error);
-        setResults([]);
+        setFileResults([]);
+        setContentResults([]);
       } finally {
         setIsSearching(false);
       }
-    }, 150); // 150ms debounce
+    }, 150);
 
     return () => clearTimeout(timer);
   }, [query]);
@@ -72,19 +110,28 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
     (e: React.KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, results.length - 1));
+        setSelectedIndex((prev) => Math.min(prev + 1, totalResults - 1));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((prev) => Math.max(prev - 1, 0));
-      } else if (e.key === 'Enter' && results[selectedIndex]) {
+      } else if (e.key === 'Enter' && totalResults > 0) {
         e.preventDefault();
-        handleOpenFile(results[selectedIndex].path);
+        const result = allResults[selectedIndex];
+        if (result) handleOpenFile(result.path);
+      } else if (e.key === ' ' && totalResults > 0 && onQuickLook) {
+        e.preventDefault();
+        const result = allResults[selectedIndex];
+        if (result) onQuickLook(result.path);
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+      } else if (e.key === 'Tab') {
+        e.preventDefault();
+        setActiveTab((prev) => (prev === 'files' ? 'content' : 'files'));
+        setSelectedIndex(0);
       }
     },
-    [results, selectedIndex, onClose]
+    [allResults, selectedIndex, totalResults, onClose, onQuickLook]
   );
 
   // Open file
@@ -101,9 +148,11 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
   useEffect(() => {
     if (!isOpen) {
       setQuery('');
-      setResults([]);
+      setFileResults([]);
+      setContentResults([]);
       setSelectedIndex(0);
       setHoveredIndex(null);
+      setActiveTab('files');
     }
   }, [isOpen]);
 
@@ -152,6 +201,32 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
                   )}
                 </div>
 
+                {/* Tab Bar */}
+                {query && (
+                  <div className="flex items-center gap-0 px-6 border-b border-border-light/50 dark:border-border-dark/50">
+                    <button
+                      onClick={() => { setActiveTab('files'); setSelectedIndex(0); }}
+                      className={`px-4 py-2 text-xs font-medium tracking-tight border-b-2 transition-colors ${
+                        activeTab === 'files'
+                          ? 'border-accent-warm text-accent-warm'
+                          : 'border-transparent text-text-tertiary-light dark:text-text-tertiary-dark hover:text-text-secondary-light dark:hover:text-text-secondary-dark'
+                      }`}
+                    >
+                      Files ({fileResults.length})
+                    </button>
+                    <button
+                      onClick={() => { setActiveTab('content'); setSelectedIndex(0); }}
+                      className={`px-4 py-2 text-xs font-medium tracking-tight border-b-2 transition-colors ${
+                        activeTab === 'content'
+                          ? 'border-accent-warm text-accent-warm'
+                          : 'border-transparent text-text-tertiary-light dark:text-text-tertiary-dark hover:text-text-secondary-light dark:hover:text-text-secondary-dark'
+                      }`}
+                    >
+                      Content ({contentResults.length})
+                    </button>
+                  </div>
+                )}
+
                 {/* Results */}
                 <div className="max-h-[60vh] overflow-y-auto">
                   {isSearching && (
@@ -160,15 +235,16 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
                     </div>
                   )}
 
-                  {!isSearching && query && results.length === 0 && (
+                  {!isSearching && query && totalResults === 0 && (
                     <div className="px-6 py-8 text-center text-text-tertiary-light dark:text-text-tertiary-dark">
-                      No files found for "{query}"
+                      No {activeTab === 'files' ? 'files' : 'content'} found for "{query}"
                     </div>
                   )}
 
-                  {!isSearching && results.length > 0 && (
+                  {/* File Results */}
+                  {!isSearching && activeTab === 'files' && fileResults.length > 0 && (
                     <div className="py-2">
-                      {results.map((result, index) => (
+                      {fileResults.map((result, index) => (
                         <motion.div
                           key={result.path}
                           initial={{ opacity: 0, y: 10 }}
@@ -187,12 +263,9 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
                           }`}
                         >
                           <div className="flex items-start gap-4">
-                            {/* Icon */}
                             <div className="mt-1 text-accent-warm flex-shrink-0">
                               {getFileIcon(result.extension)}
                             </div>
-
-                            {/* Content */}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-baseline gap-2">
                                 <p className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark truncate tracking-tight">
@@ -202,8 +275,6 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
                                   {result.extension}
                                 </span>
                               </div>
-
-                              {/* QuickLook on hover */}
                               <AnimatePresence>
                                 {hoveredIndex === index && (
                                   <motion.div
@@ -217,8 +288,76 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
                                     </p>
                                     <div className="flex items-center gap-3 text-xs text-text-tertiary-light dark:text-text-tertiary-dark">
                                       <span>{formatFileSize(result.size)}</span>
-                                      <span>•</span>
+                                      <span>&bull;</span>
                                       <span>{formatDate(result.last_modified)}</span>
+                                    </div>
+                                  </motion.div>
+                                )}
+                              </AnimatePresence>
+                            </div>
+                          </div>
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Content Results */}
+                  {!isSearching && activeTab === 'content' && contentResults.length > 0 && (
+                    <div className="py-2">
+                      {contentResults.map((result, index) => (
+                        <motion.div
+                          key={`${result.file_id}-${result.chunk_id ?? index}`}
+                          initial={{ opacity: 0, y: 10 }}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ delay: index * 0.02 }}
+                          onClick={() => handleOpenFile(result.file_id)}
+                          onMouseEnter={() => {
+                            setHoveredIndex(index);
+                            setSelectedIndex(index);
+                          }}
+                          onMouseLeave={() => setHoveredIndex(null)}
+                          className={`px-6 py-3 cursor-pointer transition-colors ${
+                            selectedIndex === index
+                              ? 'bg-surface-light dark:bg-surface-dark'
+                              : 'hover:bg-surface-light/50 dark:hover:bg-surface-dark/50'
+                          }`}
+                        >
+                          <div className="flex items-start gap-4">
+                            <div className="mt-1 text-accent-warm flex-shrink-0">
+                              {getContentIcon(result.file_name)}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-baseline gap-2">
+                                <p className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark truncate tracking-tight">
+                                  {result.file_name}
+                                </p>
+                                <span className="text-xs text-accent-warm font-medium flex-shrink-0">
+                                  {result.score.toFixed(1)}
+                                </span>
+                              </div>
+                              {result.snippet && (
+                                <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-1 line-clamp-3">
+                                  {result.snippet.substring(0, 300)}
+                                  {result.snippet.length > 300 ? '...' : ''}
+                                </p>
+                              )}
+                              <AnimatePresence>
+                                {hoveredIndex === index && result.matched_terms.length > 0 && (
+                                  <motion.div
+                                    initial={{ opacity: 0, height: 0 }}
+                                    animate={{ opacity: 1, height: 'auto' }}
+                                    exit={{ opacity: 0, height: 0 }}
+                                    className="mt-2"
+                                  >
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      {result.matched_terms.map((term, i) => (
+                                        <span
+                                          key={i}
+                                          className="px-2 py-0.5 bg-accent-warm/10 text-accent-warm text-xs rounded-full"
+                                        >
+                                          {term}
+                                        </span>
+                                      ))}
                                     </div>
                                   </motion.div>
                                 )}
@@ -232,15 +371,17 @@ export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProp
                 </div>
 
                 {/* Footer */}
-                {results.length > 0 && (
+                {totalResults > 0 && (
                   <div className="px-6 py-3 border-t border-border-light dark:border-border-dark flex items-center justify-between text-xs text-text-tertiary-light dark:text-text-tertiary-dark">
                     <div className="flex items-center gap-4">
-                      <span>{results.length} result{results.length !== 1 ? 's' : ''}</span>
+                      <span>{totalResults} result{totalResults !== 1 ? 's' : ''}</span>
                     </div>
                     <div className="flex items-center gap-2">
-                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded">↑↓</kbd>
+                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded">Tab</kbd>
+                      <span>Switch</span>
+                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded ml-1">↑↓</kbd>
                       <span>Navigate</span>
-                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded ml-2">↵</kbd>
+                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded ml-1">↵</kbd>
                       <span>Open</span>
                     </div>
                   </div>

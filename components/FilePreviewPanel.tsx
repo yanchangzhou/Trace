@@ -8,6 +8,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { ParsedDocument } from '@/types';
 import { parseDocument } from '@/lib/documentParser';
 import { buildPreviewFileFromBytes } from '@/lib/previewFile';
+import { parseAndStoreDocument } from '@/lib/tauri';
 import DocumentRenderer from './DocumentRenderer';
 import { invoke } from '@tauri-apps/api/core';
 
@@ -113,6 +114,15 @@ export default function FilePreviewPanel() {
           });
           setParsedContent(parsed);
           applyParsedForPreview(parsed, currentFile);
+
+          // Also store document chunks in the DB
+          const fileId = Number(currentFile.id);
+          if (!isNaN(fileId)) {
+            parseAndStoreDocument(fileId, currentFile.path).catch((err) =>
+              console.error('Failed to store document data:', err)
+            );
+          }
+
           setIsLoading(false);
         } else {
           if (!currentFile.file) {

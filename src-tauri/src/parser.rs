@@ -2,11 +2,10 @@ use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::io::{Cursor, Read};
 use std::path::Path;
+use unicode_segmentation::UnicodeSegmentation;
 
-/// Maximum content size to parse (2KB summary)
 const MAX_SUMMARY_SIZE: usize = 2048;
 
-/// Parsed document content with structured metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ParsedDocument {
     pub file_path: String,
@@ -14,12 +13,10 @@ pub struct ParsedDocument {
     pub summary: String,
     pub metadata: DocumentMetadata,
     pub content_preview: String,
-    /// Raw file bytes for PDF / Office previews on the frontend (no heavy Rust parsing for PDF).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub content_bytes: Option<Vec<u8>>,
 }
 
-/// Document metadata
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DocumentMetadata {
     pub page_count: Option<usize>,
@@ -29,7 +26,6 @@ pub struct DocumentMetadata {
     pub headings: Vec<String>,
 }
 
-/// PPTX slide structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PptxSlide {
     pub slide_number: i32,
@@ -54,11 +50,94 @@ pub fn parse_document(file_path: &Path) -> Result<ParsedDocument> {
     }
 }
 
-/// Parse PDF: read bytes only; rendering is done in the webview with pdf.js (avoids pdf-extract / path issues).
-fn parse_pdf(file_path: &Path) -> Result<ParsedDocument> {
-    println!("Loading PDF bytes: {:?}", file_path);
+/// Extract full text from any supported document for indexing
+pub fn extract_full_text(file_path: &Path) -> Result<String> {
+    let extension = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+
+    match extension.as_str() {
+        "pdf" => extract_pdf_text(file_path),
+        "docx" => extract_docx_text(file_path),
+        "pptx" => extract_pptx_text(file_path),
+        "txt" | "md" => extract_text_text(file_path),
+        _ => Err(anyhow::anyhow!("Unsupported file type: {}", extension)),
+    }
+}
+
+fn extract_pdf_text(file_path: &Path) -> Result<String> {
     let bytes = std::fs::read(file_path)?;
-    let summary = "PDF — preview is rendered below in the panel.".to_string();
+    match pdf_extract::extract_text_from_mem(&bytes) {
+        Ok(text) => Ok(text),
+        Err(e) => {
+            eprintln!("PDF text extraction failed for {:?}: {}", file_path, e);
+            Ok(String::new())
+        }
+    }
+}
+
+fn extract_docx_text(file_path: &Path) -> Result<String> {
+    let bytes = std::fs::read(file_path)?;
+    let docx = docx_rs::read_docx(&bytes)?;
+    let mut text = String::new();
+    for child in &docx.document.children {
+        if let docx_rs::DocumentChild::Paragraph(para) = child {
+            for c in &para.children {
+                if let docx_rs::ParagraphChild::Run(run) = c {
+                    for rc in &run.children {
+                        if let docx_rs::RunChild::Text(t) = rc {
+                            text.push_str(&t.text);
+                        }
+                    }
+                }
+            }
+            text.push('\n');
+        }
+    }
+    Ok(text)
+}
+
+fn extract_pptx_text(file_path: &Path) -> Result<String> {
+    let bytes = std::fs::read(file_path)?;
+    let cursor = Cursor::new(bytes);
+    let mut archive = zip::ZipArchive::new(cursor)?;
+    let mut text = String::new();
+    let mut slide_number = 1;
+    loop {
+        let slide_path = format!("ppt/slides/slide{}.xml", slide_number);
+        match archive.by_name(&slide_path) {
+            Ok(mut slide_file) => {
+                let mut content = String::new();
+                slide_file.read_to_string(&mut content)?;
+                let slide_text = extract_text_from_xml(&content);
+                if !slide_text.is_empty() {
+                    text.push_str(&slide_text);
+                    text.push('\n');
+                }
+                slide_number += 1;
+            }
+            Err(_) => break,
+        }
+    }
+    Ok(text)
+}
+
+fn extract_text_text(file_path: &Path) -> Result<String> {
+    let bytes = std::fs::read(file_path)?;
+    Ok(String::from_utf8_lossy(&bytes).to_string())
+}
+
+fn parse_pdf(file_path: &Path) -> Result<ParsedDocument> {
+    println!("Loading PDF: {:?}", file_path);
+    let bytes = std::fs::read(file_path)?;
+    // Try to extract text for summary
+    let pdf_text = pdf_extract::extract_text_from_mem(&bytes).unwrap_or_default();
+    let word_count = pdf_text.split_whitespace().count();
+    let summary = safe_truncate(&pdf_text, MAX_SUMMARY_SIZE);
+    let content_preview = safe_truncate(&pdf_text, 500);
+
     Ok(ParsedDocument {
         file_path: file_path.to_string_lossy().to_string(),
         file_type: "pdf".to_string(),
@@ -66,25 +145,23 @@ fn parse_pdf(file_path: &Path) -> Result<ParsedDocument> {
         metadata: DocumentMetadata {
             page_count: None,
             slide_count: None,
-            word_count: 0,
+            word_count,
             has_images: true,
             headings: Vec::new(),
         },
-        content_preview: String::new(),
+        content_preview,
         content_bytes: Some(bytes),
     })
 }
 
-/// Parse DOCX files — attach full bytes for docx-preview; optional text extraction for metadata only.
 fn parse_docx(file_path: &Path) -> Result<ParsedDocument> {
     println!("Parsing DOCX: {:?}", file_path);
     let bytes = std::fs::read(file_path)?;
     let docx = docx_rs::read_docx(&bytes)?;
-    
-    // Extract text from paragraphs
+
     let mut text = String::new();
     let mut headings = Vec::new();
-    
+
     for child in &docx.document.children {
         if let docx_rs::DocumentChild::Paragraph(para) = child {
             let para_text: String = para
@@ -109,9 +186,8 @@ fn parse_docx(file_path: &Path) -> Result<ParsedDocument> {
                     }
                 })
                 .collect();
-            
+
             if !para_text.is_empty() {
-                // Check if it's a heading (simple heuristic)
                 if para_text.len() < 100 && para_text.chars().next().map_or(false, |c| c.is_uppercase()) {
                     headings.push(para_text.clone());
                 }
@@ -120,31 +196,11 @@ fn parse_docx(file_path: &Path) -> Result<ParsedDocument> {
             }
         }
     }
-    
+
     let word_count = text.split_whitespace().count();
-    
-    // Create summary (ensure we don't split in the middle of a UTF-8 character)
-    let summary = if text.len() > MAX_SUMMARY_SIZE {
-        let mut end = MAX_SUMMARY_SIZE;
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &text[..end])
-    } else {
-        text.clone()
-    };
-    
-    // Content preview (ensure we don't split in the middle of a UTF-8 character)
-    let content_preview = if text.len() > 500 {
-        let mut end = 500;
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &text[..end])
-    } else {
-        text.clone()
-    };
-    
+    let summary = safe_truncate(&text, MAX_SUMMARY_SIZE);
+    let content_preview = safe_truncate(&text, 500);
+
     Ok(ParsedDocument {
         file_path: file_path.to_string_lossy().to_string(),
         file_type: "docx".to_string(),
@@ -161,28 +217,22 @@ fn parse_docx(file_path: &Path) -> Result<ParsedDocument> {
     })
 }
 
-/// Parse PPTX files (PowerPoint)
 fn parse_pptx(file_path: &Path) -> Result<ParsedDocument> {
     println!("Parsing PPTX: {:?}", file_path);
     let bytes = std::fs::read(file_path)?;
     let cursor = Cursor::new(bytes.clone());
     let mut archive = zip::ZipArchive::new(cursor)?;
-    
+
     let mut slides = Vec::new();
     let mut slide_number = 1;
-    
-    // Iterate through slides
+
     loop {
         let slide_path = format!("ppt/slides/slide{}.xml", slide_number);
-        
         match archive.by_name(&slide_path) {
             Ok(mut slide_file) => {
                 let mut content = String::new();
                 slide_file.read_to_string(&mut content)?;
-                
-                // Extract text from XML (simple approach)
                 let text = extract_text_from_xml(&content);
-                
                 if !text.is_empty() {
                     slides.push(PptxSlide {
                         slide_number: slide_number as i32,
@@ -190,65 +240,33 @@ fn parse_pptx(file_path: &Path) -> Result<ParsedDocument> {
                         layout_summary: format!("Slide {} layout", slide_number),
                     });
                 }
-                
                 slide_number += 1;
             }
             Err(_) => break,
         }
     }
-    
+
     let slide_count = slides.len();
-    
-    // Create summary
     let summary_text = if slide_count > 0 {
         format!(
             "This presentation has {} slides. Topics: {}",
             slide_count,
-            slides
-                .iter()
-                .take(3)
-                .map(|s| {
-                    let preview = s.content.split_whitespace().take(5).collect::<Vec<_>>().join(" ");
-                    format!("Slide {}: {}", s.slide_number, preview)
-                })
-                .collect::<Vec<_>>()
-                .join("; ")
+            slides.iter().take(3).map(|s| {
+                let preview = s.content.split_whitespace().take(5).collect::<Vec<_>>().join(" ");
+                format!("Slide {}: {}", s.slide_number, preview)
+            }).collect::<Vec<_>>().join("; ")
         )
     } else {
         "Empty presentation".to_string()
     };
-    
-    // Ensure summary respects UTF-8 boundaries
-    let summary = if summary_text.len() > MAX_SUMMARY_SIZE {
-        let mut end = MAX_SUMMARY_SIZE;
-        while end > 0 && !summary_text.is_char_boundary(end) {
-            end -= 1;
-        }
-        summary_text[..end].to_string()
-    } else {
-        summary_text
-    };
-    
-    // Content preview (first 3 slides)
-    let preview_text = slides
-        .iter()
-        .take(3)
+
+    let summary = safe_truncate(&summary_text, MAX_SUMMARY_SIZE);
+    let preview_text = slides.iter().take(3)
         .map(|s| format!("Slide {}:\n{}\n", s.slide_number, s.content))
         .collect::<String>();
-    
-    // Ensure content preview respects UTF-8 boundaries
-    let content_preview = if preview_text.len() > 500 {
-        let mut end = 500;
-        while end > 0 && !preview_text.is_char_boundary(end) {
-            end -= 1;
-        }
-        preview_text[..end].to_string()
-    } else {
-        preview_text
-    };
-    
+    let content_preview = safe_truncate(&preview_text, 500);
     let word_count: usize = slides.iter().map(|s| s.content.split_whitespace().count()).sum();
-    
+
     Ok(ParsedDocument {
         file_path: file_path.to_string_lossy().to_string(),
         file_type: "pptx".to_string(),
@@ -265,36 +283,14 @@ fn parse_pptx(file_path: &Path) -> Result<ParsedDocument> {
     })
 }
 
-/// Parse plain text files
 fn parse_text(file_path: &Path) -> Result<ParsedDocument> {
     println!("Parsing text file: {:?}", file_path);
     let bytes = std::fs::read(file_path)?;
     let text = String::from_utf8_lossy(&bytes).to_string();
-    
     let word_count = text.split_whitespace().count();
-    
-    // Create summary (respecting UTF-8 boundaries)
-    let summary = if text.len() > MAX_SUMMARY_SIZE {
-        let mut end = MAX_SUMMARY_SIZE;
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &text[..end])
-    } else {
-        text.clone()
-    };
-    
-    // Content preview (respecting UTF-8 boundaries)
-    let content_preview = if text.len() > 500 {
-        let mut end = 500;
-        while end > 0 && !text.is_char_boundary(end) {
-            end -= 1;
-        }
-        format!("{}...", &text[..end])
-    } else {
-        text.clone()
-    };
-    
+    let summary = safe_truncate(&text, MAX_SUMMARY_SIZE);
+    let content_preview = safe_truncate(&text, 500);
+
     Ok(ParsedDocument {
         file_path: file_path.to_string_lossy().to_string(),
         file_type: "text".to_string(),
@@ -311,24 +307,36 @@ fn parse_text(file_path: &Path) -> Result<ParsedDocument> {
     })
 }
 
-/// Extract text from XML content (simple approach)
 fn extract_text_from_xml(xml: &str) -> String {
     use xml::reader::{EventReader, XmlEvent};
-    
     let parser = EventReader::from_str(xml);
     let mut text = String::new();
-    
     for event in parser {
         if let Ok(XmlEvent::Characters(content)) = event {
             text.push_str(&content);
             text.push(' ');
         }
     }
-    
     text.trim().to_string()
 }
 
-/// Get a quick summary for a file (async-friendly)
+/// Truncate string safely at a character boundary
+fn safe_truncate(text: &str, max_len: usize) -> String {
+    if text.len() <= max_len {
+        return text.to_string();
+    }
+    let mut end = max_len;
+    while end > 0 && !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    if end < text.len() {
+        format!("{}...", &text[..end])
+    } else {
+        text.to_string()
+    }
+}
+
+/// Get a quick summary for a file
 pub fn get_file_summary(file_path: &Path) -> String {
     match parse_document(file_path) {
         Ok(parsed) => {
@@ -352,22 +360,119 @@ pub fn get_file_summary(file_path: &Path) -> String {
     }
 }
 
-/// Extract chunks from a document for indexing
+/// Split text into chunks by word boundaries (sentence-aware)
+pub fn chunk_text(text: &str, max_chunk_size: usize) -> Vec<String> {
+    let mut chunks = Vec::new();
+    let words: Vec<&str> = text.split_whitespace().collect();
+
+    if words.is_empty() {
+        return chunks;
+    }
+
+    let mut current_chunk = Vec::new();
+    let mut current_len = 0;
+
+    for word in &words {
+        if current_len + word.len() > max_chunk_size && !current_chunk.is_empty() {
+            chunks.push(current_chunk.join(" "));
+            current_chunk = Vec::new();
+            current_len = 0;
+        }
+        current_chunk.push(*word);
+        current_len += word.len() + 1; // +1 for space
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk.join(" "));
+    }
+
+    chunks
+}
+
+/// Extract character-based chunks (for backward compatibility)
+#[allow(dead_code)]
 pub fn extract_chunks(content: &str, chunk_size: usize) -> Vec<String> {
     content
-        .chars()
+        .graphemes(true)
         .collect::<Vec<_>>()
         .chunks(chunk_size)
-        .map(|chunk| chunk.iter().collect::<String>())
+        .map(|chunk| chunk.iter().map(|s| *s).collect::<String>())
         .collect()
 }
 
-/// Unified text extraction pipeline with chunking
+/// Unified text extraction and chunking pipeline
 pub fn parse_and_chunk(file_path: &Path, chunk_size: usize) -> Result<Vec<String>> {
-    let parsed_document = parse_document(file_path)?;
-    let content = match parsed_document.file_type.as_str() {
-        "pdf" | "docx" | "pptx" | "text" => parsed_document.content_preview,
-        _ => return Err(anyhow::anyhow!("Unsupported file type for chunking")),
+    let text = extract_full_text(file_path)?;
+    if text.is_empty() {
+        return Ok(vec!["[No readable text content]".to_string()]);
+    }
+    Ok(chunk_text(&text, chunk_size))
+}
+
+/// Extract full text with metadata for document persistence
+pub fn extract_document_data(file_path: &Path) -> Result<DocumentData> {
+    let text = extract_full_text(file_path)?;
+    let extension = file_path
+        .extension()
+        .and_then(|e| e.to_str())
+        .unwrap_or("")
+        .to_lowercase();
+    let file_type: &str = match extension.as_str() {
+        "pdf" => "pdf",
+        "docx" => "docx",
+        "pptx" => "pptx",
+        "txt" | "md" => "text",
+        _ => "unknown",
     };
-    Ok(extract_chunks(&content, chunk_size))
+
+    let word_count = text.split_whitespace().count() as i64;
+    let headings: Vec<String> = text
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            trimmed.len() < 100 && trimmed.len() > 3 && !trimmed.ends_with('.')
+        })
+        .take(20)
+        .map(|s| s.trim().to_string())
+        .collect();
+
+    let chunks = chunk_text(&text, 1000)
+        .into_iter()
+        .enumerate()
+        .map(|(i, text)| ChunkData {
+            chunk_index: i as i64,
+            text,
+            token_count: 0,
+            locator_json: "{}".to_string(),
+        })
+        .collect();
+
+    Ok(DocumentData {
+        file_type: file_type.to_string(),
+        summary: safe_truncate(&text, 500),
+        word_count,
+        page_count: None,
+        slide_count: None,
+        headings_json: serde_json::to_string(&headings).unwrap_or_default(),
+        chunks,
+    })
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentData {
+    pub file_type: String,
+    pub summary: String,
+    pub word_count: i64,
+    pub page_count: Option<i64>,
+    pub slide_count: Option<i64>,
+    pub headings_json: String,
+    pub chunks: Vec<ChunkData>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChunkData {
+    pub chunk_index: i64,
+    pub text: String,
+    pub token_count: i64,
+    pub locator_json: String,
 }
