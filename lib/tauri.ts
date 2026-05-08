@@ -9,6 +9,36 @@ export interface SearchResult {
   score: number;
 }
 
+export interface Book {
+  id: number;
+  name: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface FileRecord {
+  id: number;
+  book_id: number;
+  name: string;
+  path: string;
+  extension: string;
+  size: number;
+  hash: string;
+  status: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DocumentSearchResult {
+  file_id: string;
+  file_name: string;
+  chunk_id?: number | null;
+  snippet: string;
+  score: number;
+  locator?: string | null;
+  matched_terms: string[];
+}
+
 /**
  * Search local files using the Rust backend
  */
@@ -28,6 +58,66 @@ export async function getDocsFolder(): Promise<string> {
  */
 export async function reindexFiles(): Promise<number> {
   return await invoke<number>('reindex_files');
+}
+
+export async function listBooks(databaseUrl: string): Promise<Book[]> {
+  return await invoke<Book[]>('list_books', { database_url: databaseUrl });
+}
+
+export async function createBook(databaseUrl: string, name: string): Promise<number> {
+  return await invoke<number>('create_book', { database_url: databaseUrl, name });
+}
+
+export async function renameBook(databaseUrl: string, bookId: number, newName: string): Promise<void> {
+  return await invoke<void>('rename_book', { database_url: databaseUrl, book_id: bookId, new_name: newName });
+}
+
+export async function deleteBook(databaseUrl: string, bookId: number): Promise<void> {
+  return await invoke<void>('delete_book', { database_url: databaseUrl, book_id: bookId });
+}
+
+export async function listFilesByBook(databaseUrl: string, bookId: number): Promise<FileRecord[]> {
+  return await invoke<FileRecord[]>('list_files_by_book', { database_url: databaseUrl, book_id: bookId });
+}
+
+export async function getFileDetail(databaseUrl: string, fileId: number): Promise<FileRecord | null> {
+  return await invoke<FileRecord | null>('get_file_detail', { database_url: databaseUrl, file_id: fileId });
+}
+
+export async function deleteFile(databaseUrl: string, fileId: number): Promise<void> {
+  return await invoke<void>('delete_file', { database_url: databaseUrl, file_id: fileId });
+}
+
+export async function syncLibrary(databaseUrl: string, bookId: number, bookPath: string): Promise<void> {
+  return await invoke<void>('sync_library', { database_url: databaseUrl, book_id: bookId, book_path: bookPath });
+}
+
+export async function searchDocuments(query: string, scope?: string, limit?: number): Promise<DocumentSearchResult[]> {
+  return await invoke<DocumentSearchResult[]>('search_documents', { query, scope, limit });
+}
+
+export async function getDocumentChunks(filePath: string, chunkSize?: number): Promise<string[]> {
+  return await invoke<string[]>('get_document_chunks', { file_path: filePath, chunk_size: chunkSize });
+}
+
+export async function summarizeDocument(filePath: string): Promise<string> {
+  return await invoke<string>('summarize_document', { file_path: filePath });
+}
+
+export async function getNote(databaseUrl: string, noteId: number): Promise<any> {
+  return await invoke<any>('get_note', { database_url: databaseUrl, note_id: noteId });
+}
+
+export async function updateNote(databaseUrl: string, note: any): Promise<void> {
+  return await invoke<void>('update_note', { database_url: databaseUrl, note });
+}
+
+export async function generateWithContext(databaseUrl: string, noteId: number, prompt: string): Promise<string> {
+  return await invoke<string>('generate_with_context', { database_url: databaseUrl, note_id: noteId, prompt });
+}
+
+export async function retryGeneration(generationId?: string): Promise<string> {
+  return await invoke<string>('retry_generation', { generation_id: generationId });
 }
 
 /**

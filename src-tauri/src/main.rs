@@ -215,6 +215,96 @@ async fn list_all_files() -> Result<Vec<SearchResult>, String> {
         .map_err(|e| e.to_string())
 }
 
+/// Tauri command: List books from SQLite
+#[tauri::command]
+async fn list_books(database_url: &str) -> Result<Vec<db::Book>, String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    db.list_books().await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Create a new book
+#[tauri::command]
+async fn create_book(database_url: &str, name: String) -> Result<i64, String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    db.create_book(&name, &now).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Rename a book
+#[tauri::command]
+async fn rename_book(database_url: &str, book_id: i64, new_name: String) -> Result<(), String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    let now = chrono::Utc::now().to_rfc3339();
+    db.rename_book(book_id, &new_name, &now).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Delete a book and its records
+#[tauri::command]
+async fn delete_book(database_url: &str, book_id: i64) -> Result<(), String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    db.delete_book(book_id).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: List files by book id
+#[tauri::command]
+async fn list_files_by_book(database_url: &str, book_id: i64) -> Result<Vec<db::FileRecord>, String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    db.list_files_by_book(book_id).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Get file detail
+#[tauri::command]
+async fn get_file_detail(database_url: &str, file_id: i64) -> Result<Option<db::FileRecord>, String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    db.get_file_detail(file_id).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Delete file record and related metadata
+#[tauri::command]
+async fn delete_file(database_url: &str, file_id: i64) -> Result<(), String> {
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    db.delete_file(file_id).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Sync library for a given book by scanning the book folder
+#[tauri::command]
+async fn sync_library(database_url: &str, book_id: i64, book_path: String) -> Result<(), String> {
+    use walkdir::WalkDir;
+
+    let mut files = Vec::new();
+    for entry in WalkDir::new(&book_path).follow_links(true).into_iter().filter_map(|e| e.ok()) {
+        if entry.file_type().is_file() {
+            let p = entry.path().to_string_lossy().to_string();
+            if let Ok(meta) = entry.metadata() {
+                files.push((p, meta.len() as i64, entry.path().extension().and_then(|e| e.to_str()).unwrap_or("").to_string()));
+            }
+        }
+    }
+
+    let db = db::Database::new(database_url).await.map_err(|e| e.to_string())?;
+    db.sync_files_for_book(book_id, files).await.map_err(|e| e.to_string())
+}
+
+/// Tauri command: Document-level search
+#[tauri::command]
+async fn search_documents(query: String, scope: Option<String>, limit: Option<u32>) -> Result<Vec<search::DocumentSearchResult>, String> {
+    let lim = limit.unwrap_or(10) as usize;
+    SEARCH_ENGINE.search_documents(&query, scope.as_deref(), lim).map_err(|e| e.to_string())
+}
+
+/// Tauri command: Get document chunks
+#[tauri::command]
+async fn get_document_chunks(file_path: String, chunk_size: Option<usize>) -> Result<Vec<String>, String> {
+    let size = chunk_size.unwrap_or(1000);
+    SEARCH_ENGINE.get_document_chunks(&file_path, size).map_err(|e| e.to_string())
+}
+
+/// Tauri command: Summarize a document
+#[tauri::command]
+async fn summarize_document(file_path: String) -> Result<String, String> {
+    SEARCH_ENGINE.summarize_document(&file_path).map_err(|e| e.to_string())
+}
+
 /// Tauri command: Create a book folder
 #[tauri::command]
 async fn create_book_folder(book_id: String) -> Result<String, String> {
@@ -392,6 +482,47 @@ async fn build_ai_context(database_url: &str, note_id: i64) -> Result<String, St
     Ok(context)
 }
 
+#[tauri::command]
+async fn get_note(database_url: &str, note_id: i64) -> Result<Note, String> {
+    let db = Database::new(database_url).await.map_err(|e| e.to_string())?;
+    let note = sqlx::query_as!(Note, "SELECT * FROM notes WHERE id = ?", note_id)
+        .fetch_one(&db.pool)
+        .await
+        .map_err(|e| e.to_string())?;
+    Ok(note)
+}
+
+#[tauri::command]
+async fn update_note(database_url: &str, note: Note) -> Result<(), String> {
+    let db = Database::new(database_url).await.map_err(|e| e.to_string())?;
+    sqlx::query(
+        "UPDATE notes SET title = ?, content_json = ?, plain_text = ?, updated_at = ? WHERE id = ?"
+    )
+    .bind(&note.title)
+    .bind(&note.content_json)
+    .bind(&note.plain_text)
+    .bind(&note.updated_at)
+    .bind(note.id)
+    .execute(&db.pool)
+    .await
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+// Placeholder: call LLM or local generator with built context
+#[tauri::command]
+async fn generate_with_context(database_url: &str, note_id: i64, prompt: String) -> Result<String, String> {
+    // For now, just return the built context + prompt as a placeholder
+    let context = build_ai_context(database_url, note_id).await?;
+    Ok(format!("[SIMULATED_GENERATION]\nContext:\n{}\n\nPrompt:\n{}", context, prompt))
+}
+
+#[tauri::command]
+async fn retry_generation(generation_id: Option<String>) -> Result<String, String> {
+    // Placeholder implementation: not implemented yet
+    Ok(format!("retry not implemented: {:?}", generation_id))
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -477,7 +608,22 @@ fn main() {
             list_book_files,
             create_note,
             list_notes_by_book,
+            get_note,
+            update_note,
+            generate_with_context,
+            retry_generation,
             build_ai_context,
+            list_books,
+            create_book,
+            rename_book,
+            delete_book,
+            list_files_by_book,
+            get_file_detail,
+            delete_file,
+            sync_library,
+            search_documents,
+            get_document_chunks,
+            summarize_document,
             create_block,
             list_blocks_by_note,
             create_snapshot,

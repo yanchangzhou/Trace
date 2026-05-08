@@ -1,6 +1,7 @@
 use anyhow::Result;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
+use crate::parser;
 use std::sync::{Arc, Mutex};
 use tantivy::collector::TopDocs;
 use tantivy::query::QueryParser;
@@ -12,6 +13,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Maximum file size to index (10MB) - larger files only get metadata indexed
 const MAX_CONTENT_SIZE: u64 = 10_000_000;
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DocumentSearchResult {
+    pub file_id: String,
+    pub file_name: String,
+    pub chunk_id: Option<i64>,
+    pub snippet: String,
+    pub score: f32,
+    pub locator: Option<String>,
+    pub matched_terms: Vec<String>,
+}
 
 /// LRU cache expiry in seconds (30 days)
 const CACHE_EXPIRY_SECONDS: i64 = 30 * 24 * 60 * 60;
@@ -111,6 +122,12 @@ impl SearchEngine {
         })
     }
     
+        pub fn search_documents(&self, query_str: &str, scope: Option<&str>, limit: usize) -> Result<Vec<DocumentSearchResult>> {
+            let reader = self
+                .index
+                .reader_builder()
+                .reload_policy(ReloadPolicy::OnCommitWithDelay)
+                .try_into()?;
     /// Index a single file with size-aware optimization
     pub fn index_file(&self, file_path: &Path) -> Result<()> {
         let metadata = std::fs::metadata(file_path)?;
@@ -289,7 +306,84 @@ impl SearchEngine {
         let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
         
         let mut results = Vec::new();
+        for (score, doc_address) in top_docs {
+            let retrieved_doc = searcher.doc(doc_address)?;
+
+            let name = retrieved_doc
+                .get_first(self.name_field)
+                .and_then(|v: &OwnedValue| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            let path = retrieved_doc
+                .get_first(self.path_field)
+                .and_then(|v: &OwnedValue| v.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            results.push(DocumentSearchResult {
+                file_id: path.clone(),
+                file_name: name,
+                chunk_id: None,
+                snippet: String::new(),
+                score,
+                locator: None,
+                matched_terms: vec![query_str.to_string()],
+            });
+        }
         
+        Ok(results)
+    }
+
+    /// Return text chunks for a document by trying to parse and chunk it.
+    pub fn get_document_chunks(&self, file_path: &str, chunk_size: usize) -> Result<Vec<String>> {
+        let path = std::path::Path::new(file_path);
+        match parser::parse_and_chunk(path, chunk_size) {
+            Ok(chunks) => Ok(chunks),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Summarize a document using the parser pipeline
+    pub fn summarize_document(&self, file_path: &str) -> Result<String> {
+        let path = std::path::Path::new(file_path);
+        match parser::parse_document(path) {
+            Ok(parsed) => Ok(parsed.summary),
+            Err(e) => Err(e),
+        }
+    }
+
+    /// Placeholder for related documents — use filename similarity for now
+    pub fn get_related_documents(&self, file_path: &str, limit: usize) -> Result<Vec<String>> {
+        let file_name = std::path::Path::new(file_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("")
+            .to_lowercase();
+
+        let reader = self
+            .index
+            .reader_builder()
+            .reload_policy(ReloadPolicy::OnCommitWithDelay)
+            .try_into()?;
+
+        let searcher = reader.searcher();
+        let query_parser = QueryParser::for_index(&self.index, vec![self.name_field]);
+        let query = query_parser.parse_query(&file_name)?;
+        let top_docs = searcher.search(&query, &TopDocs::with_limit(limit))?;
+
+        let mut results = Vec::new();
+        for (_score, doc_address) in top_docs {
+            let retrieved_doc = searcher.doc(doc_address)?;
+            if let Some(path_val) = retrieved_doc.get_first(self.path_field) {
+                if let Some(path_str) = path_val.as_str() {
+                    results.push(path_str.to_string());
+                }
+            }
+        }
+
+        Ok(results)
+    }
         for (score, doc_address) in top_docs {
             let retrieved_doc: TantivyDocument = searcher.doc(doc_address)?;
             
