@@ -12,6 +12,7 @@ use db::{Database, Note, NoteSource, Block, VersionHistory, Session};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tauri::Manager;
+#[cfg(target_os = "macos")]
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 use watcher::FileWatcher;
 
@@ -36,14 +37,14 @@ fn get_trace_docs_path() -> PathBuf {
     path
 }
 
-fn get_db_url() -> String {
+fn get_db_path() -> PathBuf {
     let mut db_path = get_trace_docs_path();
     db_path.push("trace.db");
-    format!("sqlite://{}", db_path.to_string_lossy())
+    db_path
 }
 
 async fn get_db() -> Result<Database, String> {
-    Database::new(&get_db_url()).await.map_err(|e| e.to_string())
+    Database::new(&get_db_path()).await.map_err(|e| e.to_string())
 }
 
 // ═══════════════════════════════════════════════════════════════
@@ -711,6 +712,7 @@ fn main() {
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
+            #[allow(unused_variables)]
             let window = app.get_webview_window("main").unwrap();
 
             #[cfg(target_os = "macos")]
@@ -745,8 +747,9 @@ fn main() {
             });
 
             // Initialize SQLite DB and create tables
+            let db_path = get_db_path();
             tauri::async_runtime::spawn(async move {
-                match Database::new(&get_db_url()).await {
+                match Database::new(&db_path).await {
                     Ok(db) => {
                         if let Err(e) = db.create_tables().await {
                             eprintln!("Failed to create core tables: {:?}", e);

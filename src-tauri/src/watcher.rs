@@ -115,9 +115,8 @@ fn is_hidden(path: &Path) -> bool {
 async fn sync_file_to_db(watch_path: &Path, file_path: &Path) {
     let mut db_path = watch_path.to_path_buf();
     db_path.push("trace.db");
-    let db_url = format!("sqlite://{}", db_path.to_string_lossy());
 
-    let db = match crate::db::Database::new(&db_url).await {
+    let db = match crate::db::Database::new(&db_path).await {
         Ok(db) => db,
         Err(e) => {
             eprintln!("Failed to open DB: {:?}", e);
@@ -173,9 +172,8 @@ async fn sync_file_to_db(watch_path: &Path, file_path: &Path) {
 async fn remove_file_from_db(watch_path: &Path, file_path: &Path) {
     let mut db_path = watch_path.to_path_buf();
     db_path.push("trace.db");
-    let db_url = format!("sqlite://{}", db_path.to_string_lossy());
 
-    let db = match crate::db::Database::new(&db_url).await {
+    let db = match crate::db::Database::new(&db_path).await {
         Ok(db) => db,
         Err(e) => {
             eprintln!("Failed to open DB: {:?}", e);

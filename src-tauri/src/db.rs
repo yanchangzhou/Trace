@@ -1,6 +1,9 @@
 use serde::{Deserialize, Serialize};
-use sqlx::{sqlite::SqlitePoolOptions, Pool, Row, Sqlite};
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::{Pool, Row, Sqlite};
 use anyhow::Result;
+use std::path::Path;
+use std::str::FromStr;
 
 // ── Models ──
 
@@ -109,10 +112,15 @@ pub struct Database {
 }
 
 impl Database {
-    pub async fn new(database_url: &str) -> Result<Self> {
+    pub async fn new(db_path: &Path) -> Result<Self> {
+        if let Some(parent) = db_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let options = SqliteConnectOptions::from_str(&format!("sqlite:{}", db_path.to_string_lossy().replace('\\', "/")))?
+            .create_if_missing(true);
         let pool = SqlitePoolOptions::new()
             .max_connections(5)
-            .connect(database_url)
+            .connect_with(options)
             .await?;
         Ok(Self { pool })
     }
