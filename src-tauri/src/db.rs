@@ -25,6 +25,7 @@ pub struct FileRecord {
     pub size: i64,
     pub hash: String,
     pub status: String,
+    pub error_message: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -101,7 +102,35 @@ pub struct Session {
 pub struct StyleProfile {
     pub id: i64,
     pub book_id: i64,
+    pub name: String,
+    pub source_scope: String,
+    pub language: String,
     pub profile_json: String,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct StyleExample {
+    pub id: i64,
+    pub profile_id: i64,
+    pub file_id: Option<i64>,
+    pub note_id: Option<i64>,
+    pub text: String,
+    pub tags_json: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct GenerationRun {
+    pub id: i64,
+    pub note_id: i64,
+    pub scene: String,
+    pub stage: String,
+    pub input_json: String,
+    pub prompt_full: String,
+    pub output_raw: Option<String>,
+    pub output_json: Option<String>,
+    pub user_adopted: i32,
     pub created_at: String,
 }
 
@@ -241,9 +270,41 @@ impl Database {
             "CREATE TABLE IF NOT EXISTS style_profiles (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 book_id INTEGER NOT NULL,
+                name TEXT NOT NULL DEFAULT 'Unnamed Profile',
+                source_scope TEXT NOT NULL DEFAULT 'book_notes',
+                language TEXT NOT NULL DEFAULT 'auto',
                 profile_json TEXT NOT NULL,
                 created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
                 FOREIGN KEY(book_id) REFERENCES books(id)
+            );"
+        ).execute(&self.pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS style_examples (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                profile_id INTEGER NOT NULL,
+                file_id INTEGER,
+                note_id INTEGER,
+                text TEXT NOT NULL,
+                tags_json TEXT NOT NULL DEFAULT '[]',
+                FOREIGN KEY(profile_id) REFERENCES style_profiles(id) ON DELETE CASCADE
+            );"
+        ).execute(&self.pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS generation_runs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                note_id INTEGER NOT NULL,
+                scene TEXT NOT NULL,
+                stage TEXT NOT NULL,
+                input_json TEXT NOT NULL,
+                prompt_full TEXT NOT NULL,
+                output_raw TEXT,
+                output_json TEXT,
+                user_adopted INTEGER DEFAULT 0,
+                created_at TEXT NOT NULL,
+                FOREIGN KEY(note_id) REFERENCES notes(id)
             );"
         ).execute(&self.pool).await?;
 
@@ -319,7 +380,6 @@ impl Database {
         Ok(file)
     }
 
-    #[allow(dead_code)]
     pub async fn get_file_by_path(&self, path: &str) -> Result<Option<FileRecord>> {
         let file = sqlx::query_as::<_, FileRecord>(
             "SELECT id, book_id, name, path, extension, size, hash, status, created_at, updated_at FROM files WHERE path = ?"
@@ -336,6 +396,16 @@ impl Database {
             .bind(file_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM files WHERE id = ?")
             .bind(file_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn update_file_status(&self, file_id: i64, status: &str, error_message: &str) -> Result<()> {
+        sqlx::query("UPDATE files SET status = ?, error_message = ? WHERE id = ?")
+            .bind(status)
+            .bind(error_message)
+            .bind(file_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 
@@ -373,7 +443,7 @@ impl Database {
                     .execute(&self.pool).await?;
             } else {
                 sqlx::query(
-                    "INSERT INTO files (book_id, name, path, extension, size, hash, status, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', 'active', ?, ?)"
+                    "INSERT INTO files (book_id, name, path, extension, size, hash, status, error_message, created_at, updated_at) VALUES (?, ?, ?, ?, ?, '', 'importing', '', ?, ?)"
                 )
                 .bind(book_id)
                 .bind(&name)
@@ -488,6 +558,7 @@ impl Database {
         sqlx::query("DELETE FROM blocks WHERE note_id = ?").bind(note_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM version_history WHERE note_id = ?").bind(note_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM sessions WHERE note_id = ?").bind(note_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM generation_runs WHERE note_id = ?").bind(note_id).execute(&self.pool).await?;
         sqlx::query("DELETE FROM notes WHERE id = ?").bind(note_id).execute(&self.pool).await?;
         Ok(())
     }
@@ -647,29 +718,256 @@ impl Database {
 
     // ── Style profile ──
 
-    pub async fn save_style_profile(&self, book_id: i64, profile_json: &str) -> Result<i64> {
-        let now = chrono::Utc::now().to_rfc3339();
-        let res = sqlx::query(
-            "INSERT INTO style_profiles (book_id, profile_json, created_at) VALUES (?, ?, ?)"
+    /// Migrate files table: add error_message column if missing.
+    pub async fn migrate_files_table(&self) -> Result<()> {
+        let columns: Vec<String> = sqlx::query("PRAGMA table_info(files)")
+            .fetch_all(&self.pool)
+            .await?
+            .into_iter()
+            .map(|r| r.get::<String, _>("name"))
+            .collect();
+
+        if columns.iter().any(|c| c == "error_message") {
+            return Ok(());
+        }
+
+        sqlx::query("ALTER TABLE files ADD COLUMN error_message TEXT DEFAULT ''")
+            .execute(&self.pool)
+            .await?;
+        Ok(())
+    }
+
+    /// Migrate existing style_profiles table to the new schema if needed.
+    pub async fn migrate_style_profile_table(&self) -> Result<()> {
+        // Check if the name column exists
+        let columns: Vec<String> = sqlx::query(
+            "PRAGMA table_info(style_profiles)"
         )
-        .bind(book_id)
-        .bind(profile_json)
-        .bind(&now)
-        .execute(&self.pool).await?;
-        Ok(res.last_insert_rowid())
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|r| r.get::<String, _>("name"))
+        .collect();
+
+        if columns.iter().any(|c| c == "name") {
+            return Ok(()); // already migrated
+        }
+
+        // Recreate the table with new schema
+        sqlx::query("BEGIN TRANSACTION").execute(&self.pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE style_profiles_new (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                book_id INTEGER NOT NULL,
+                name TEXT NOT NULL DEFAULT 'Unnamed Profile',
+                source_scope TEXT NOT NULL DEFAULT 'book_notes',
+                language TEXT NOT NULL DEFAULT 'auto',
+                profile_json TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY(book_id) REFERENCES books(id)
+            )"
+        ).execute(&self.pool).await?;
+
+        sqlx::query(
+            "INSERT INTO style_profiles_new (id, book_id, name, source_scope, language, profile_json, created_at, updated_at)
+             SELECT id, book_id, 'Legacy Profile', 'book_notes', 'auto', profile_json, created_at, created_at
+             FROM style_profiles"
+        ).execute(&self.pool).await?;
+
+        sqlx::query("DROP TABLE style_profiles").execute(&self.pool).await?;
+        sqlx::query("ALTER TABLE style_profiles_new RENAME TO style_profiles").execute(&self.pool).await?;
+
+        sqlx::query("COMMIT").execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn save_style_profile(
+        &self,
+        book_id: i64,
+        name: &str,
+        source_scope: &str,
+        language: &str,
+        profile_json: &str,
+    ) -> Result<i64> {
+        let now = chrono::Utc::now().to_rfc3339();
+        // Check if profile with this book_id already exists (one profile per book)
+        let existing = sqlx::query(
+            "SELECT id FROM style_profiles WHERE book_id = ?"
+        ).bind(book_id).fetch_optional(&self.pool).await?;
+
+        if let Some(rec) = existing {
+            let id: i64 = rec.get("id");
+            sqlx::query(
+                "UPDATE style_profiles SET name = ?, source_scope = ?, language = ?, profile_json = ?, updated_at = ? WHERE id = ?"
+            )
+            .bind(name)
+            .bind(source_scope)
+            .bind(language)
+            .bind(profile_json)
+            .bind(&now)
+            .bind(id)
+            .execute(&self.pool).await?;
+            Ok(id)
+        } else {
+            let res = sqlx::query(
+                "INSERT INTO style_profiles (book_id, name, source_scope, language, profile_json, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
+            )
+            .bind(book_id)
+            .bind(name)
+            .bind(source_scope)
+            .bind(language)
+            .bind(profile_json)
+            .bind(&now)
+            .bind(&now)
+            .execute(&self.pool).await?;
+            Ok(res.last_insert_rowid())
+        }
     }
 
     pub async fn get_style_profile(&self, book_id: i64) -> Result<Option<StyleProfile>> {
         let profile = sqlx::query_as::<_, StyleProfile>(
-            "SELECT id, book_id, profile_json, created_at FROM style_profiles WHERE book_id = ? ORDER BY created_at DESC LIMIT 1"
+            "SELECT id, book_id, name, source_scope, language, profile_json, created_at, updated_at FROM style_profiles WHERE book_id = ? ORDER BY updated_at DESC LIMIT 1"
         ).bind(book_id).fetch_optional(&self.pool).await?;
         Ok(profile)
     }
+
+    #[allow(dead_code)]
+    pub async fn get_style_profile_by_id(&self, profile_id: i64) -> Result<Option<StyleProfile>> {
+        let profile = sqlx::query_as::<_, StyleProfile>(
+            "SELECT id, book_id, name, source_scope, language, profile_json, created_at, updated_at FROM style_profiles WHERE id = ?"
+        ).bind(profile_id).fetch_optional(&self.pool).await?;
+        Ok(profile)
+    }
+
+    pub async fn list_style_profiles_by_book(&self, book_id: i64) -> Result<Vec<StyleProfile>> {
+        let profiles = sqlx::query_as::<_, StyleProfile>(
+            "SELECT id, book_id, name, source_scope, language, profile_json, created_at, updated_at FROM style_profiles WHERE book_id = ? ORDER BY updated_at DESC"
+        ).bind(book_id).fetch_all(&self.pool).await?;
+        Ok(profiles)
+    }
+
+    pub async fn delete_style_profile(&self, profile_id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM style_examples WHERE profile_id = ?")
+            .bind(profile_id).execute(&self.pool).await?;
+        sqlx::query("DELETE FROM style_profiles WHERE id = ?")
+            .bind(profile_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ── Style examples ──
+
+    pub async fn insert_style_example(
+        &self,
+        profile_id: i64,
+        file_id: Option<i64>,
+        note_id: Option<i64>,
+        text: &str,
+        tags_json: &str,
+    ) -> Result<i64> {
+        let res = sqlx::query(
+            "INSERT INTO style_examples (profile_id, file_id, note_id, text, tags_json) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(profile_id)
+        .bind(file_id)
+        .bind(note_id)
+        .bind(text)
+        .bind(tags_json)
+        .execute(&self.pool).await?;
+        Ok(res.last_insert_rowid())
+    }
+
+    pub async fn get_style_examples(&self, profile_id: i64) -> Result<Vec<StyleExample>> {
+        let examples = sqlx::query_as::<_, StyleExample>(
+            "SELECT id, profile_id, file_id, note_id, text, tags_json FROM style_examples WHERE profile_id = ? ORDER BY id"
+        ).bind(profile_id).fetch_all(&self.pool).await?;
+        Ok(examples)
+    }
+
+    #[allow(dead_code)]
+    pub async fn delete_style_examples(&self, profile_id: i64) -> Result<()> {
+        sqlx::query("DELETE FROM style_examples WHERE profile_id = ?")
+            .bind(profile_id).execute(&self.pool).await?;
+        Ok(())
+    }
+
+    // ── Text collection for style analysis ──
 
     pub async fn get_book_notes_text(&self, book_id: i64) -> Result<Vec<String>> {
         let rows = sqlx::query(
             "SELECT plain_text FROM notes WHERE book_id = ? AND plain_text != ''"
         ).bind(book_id).fetch_all(&self.pool).await?;
         Ok(rows.into_iter().map(|r| r.get::<String, _>("plain_text")).collect())
+    }
+
+    pub async fn get_book_files_text(&self, book_id: i64) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT dc.text FROM document_chunks dc
+             INNER JOIN files f ON dc.file_id = f.id
+             WHERE f.book_id = ? AND dc.text != ''
+             ORDER BY f.id, dc.chunk_index"
+        ).bind(book_id).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|r| r.get::<String, _>("text")).collect())
+    }
+
+    pub async fn get_book_headings(&self, book_id: i64) -> Result<Vec<String>> {
+        let rows = sqlx::query(
+            "SELECT d.headings_json FROM documents d
+             INNER JOIN files f ON d.file_id = f.id
+             WHERE f.book_id = ? AND d.headings_json != '[]' AND d.headings_json != ''"
+        ).bind(book_id).fetch_all(&self.pool).await?;
+        Ok(rows.into_iter().map(|r| r.get::<String, _>("headings_json")).collect())
+    }
+
+    // ── Generation runs ──
+
+    pub async fn insert_generation_run(&self, run: &GenerationRun) -> Result<i64> {
+        let res = sqlx::query(
+            "INSERT INTO generation_runs (note_id, scene, stage, input_json, prompt_full, output_raw, output_json, user_adopted, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+        )
+        .bind(run.note_id)
+        .bind(&run.scene)
+        .bind(&run.stage)
+        .bind(&run.input_json)
+        .bind(&run.prompt_full)
+        .bind(&run.output_raw)
+        .bind(&run.output_json)
+        .bind(run.user_adopted)
+        .bind(&run.created_at)
+        .execute(&self.pool).await?;
+        Ok(res.last_insert_rowid())
+    }
+
+    #[allow(dead_code)]
+    pub async fn get_generation_run(&self, run_id: i64) -> Result<GenerationRun> {
+        let run = sqlx::query_as::<_, GenerationRun>(
+            "SELECT id, note_id, scene, stage, input_json, prompt_full, output_raw, output_json, user_adopted, created_at FROM generation_runs WHERE id = ?"
+        ).bind(run_id).fetch_one(&self.pool).await?;
+        Ok(run)
+    }
+
+    pub async fn list_generation_runs_by_note(&self, note_id: i64) -> Result<Vec<GenerationRun>> {
+        let runs = sqlx::query_as::<_, GenerationRun>(
+            "SELECT id, note_id, scene, stage, input_json, prompt_full, output_raw, output_json, user_adopted, created_at FROM generation_runs WHERE note_id = ? ORDER BY created_at DESC"
+        ).bind(note_id).fetch_all(&self.pool).await?;
+        Ok(runs)
+    }
+
+    pub async fn update_generation_output(&self, run_id: i64, output_raw: &str, output_json: &str) -> Result<()> {
+        sqlx::query(
+            "UPDATE generation_runs SET output_raw = ?, output_json = ? WHERE id = ?"
+        )
+        .bind(output_raw)
+        .bind(output_json)
+        .bind(run_id)
+        .execute(&self.pool).await?;
+        Ok(())
+    }
+
+    pub async fn mark_generation_adopted(&self, run_id: i64) -> Result<()> {
+        sqlx::query("UPDATE generation_runs SET user_adopted = 1 WHERE id = ?")
+            .bind(run_id).execute(&self.pool).await?;
+        Ok(())
     }
 }

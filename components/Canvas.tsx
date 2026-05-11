@@ -41,10 +41,9 @@ import {
   updateNote,
   getNote,
   listNotesByBook,
-  buildAiContext,
-  generateWithContext,
   type Note,
 } from '@/lib/tauri';
+import AiModal from './ai/AiModal';
 
 const springConfig = {
   type: 'spring' as const,
@@ -70,9 +69,6 @@ export default function Canvas() {
   const [isSaving, setIsSaving] = useState(false);
   const [lastSaved, setLastSaved] = useState<string | null>(null);
   const [showAiModal, setShowAiModal] = useState(false);
-  const [aiPrompt, setAiPrompt] = useState('');
-  const [aiResult, setAiResult] = useState('');
-  const [isAiLoading, setIsAiLoading] = useState(false);
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const isNewNoteRef = useRef(false);
 
@@ -258,50 +254,9 @@ export default function Canvas() {
       return;
     }
     if (!currentNoteId) {
-      // Create a note first if none exists
       await handleNewNote();
     }
-
     setShowAiModal(true);
-    setAiPrompt('');
-    setAiResult('');
-
-    // Pre-build context
-    if (currentNoteId != null) {
-      try {
-        const context = await buildAiContext(currentNoteId);
-        if (context.trim()) {
-          setAiPrompt(`Use the following source materials:\n\n${context}`);
-        }
-      } catch {
-        // no sources yet
-      }
-    }
-  };
-
-  const handleGenerate = async () => {
-    if (!currentNoteId || !aiPrompt.trim() || !isTauri) return;
-
-    setIsAiLoading(true);
-    setAiResult('');
-
-    try {
-      const result = await generateWithContext(currentNoteId, aiPrompt);
-      setAiResult(result);
-    } catch (error) {
-      console.error('AI generation failed:', error);
-      setAiResult('Error: Failed to generate. Make sure sources are attached to this note.');
-    } finally {
-      setIsAiLoading(false);
-    }
-  };
-
-  const handleInsertAiResult = () => {
-    if (editor && aiResult) {
-      editor.commands.insertContent(aiResult);
-      setShowAiModal(false);
-      setAiResult('');
-    }
   };
 
   const wordCount = useMemo(() => plainText.split(/\s+/).filter(Boolean).length, [plainText]);
@@ -626,24 +581,14 @@ export default function Canvas() {
 
         {/* Action Buttons */}
         <div className="flex justify-end mt-4 gap-3">
-          {isTauri && currentNoteId && (
+          {currentNoteId && (
             <motion.button
               whileHover={{ scale: 1.05 }}
               whileTap={{ scale: 0.95 }}
               transition={{ type: 'spring', stiffness: 300, damping: 20 }}
               onClick={handleAiAssist}
               className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
-            >
-              <Sparkles className="w-4 h-4" />
-              <span className="text-sm font-medium tracking-tight">AI Assist</span>
-            </motion.button>
-          )}
-          {!isTauri && (
-            <motion.button
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-              className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
+              title={!isTauri ? 'AI Assist requires the Tauri desktop app' : undefined}
             >
               <Sparkles className="w-4 h-4" />
               <span className="text-sm font-medium tracking-tight">AI Assist</span>
@@ -667,103 +612,20 @@ export default function Canvas() {
           </div>
           <div>
             <span>
-              {lastSaved ? `Last saved: ${lastSaved}` : '---'}
+              {!isTauri ? 'Browser Demo — edits not saved' : lastSaved ? `Last saved: ${lastSaved}` : '---'}
             </span>
           </div>
         </motion.div>
       </motion.div>
 
       {/* AI Assist Modal */}
-      <AnimatePresence>
-        {showAiModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-[100]"
-            onClick={() => setShowAiModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.9, opacity: 0 }}
-              transition={{ type: 'spring', stiffness: 260, damping: 20 }}
-              onClick={(e) => e.stopPropagation()}
-              className="bg-surface-light dark:bg-surface-dark rounded-squircle-lg p-8 w-full max-w-2xl mx-4 shadow-ambient-lg dark:shadow-ambient-lg-dark max-h-[80vh] overflow-y-auto"
-            >
-              <div className="flex items-center justify-between mb-6">
-                <h2 className="text-lg font-semibold text-text-primary-light dark:text-text-primary-dark flex items-center gap-2">
-                  <Sparkles className="w-5 h-5 text-accent-warm" />
-                  AI Writing Assistant
-                </h2>
-                <button
-                  onClick={() => setShowAiModal(false)}
-                  className="w-8 h-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center"
-                >
-                  <X className="w-4 h-4 text-text-secondary-light dark:text-text-secondary-dark" />
-                </button>
-              </div>
-
-              {/* Prompt Input */}
-              <div className="mb-4">
-                <label className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark mb-2 block">
-                  What do you want to write about?
-                </label>
-                <textarea
-                  value={aiPrompt}
-                  onChange={(e) => setAiPrompt(e.target.value)}
-                  placeholder="Describe what you want the AI to help with..."
-                  rows={4}
-                  className="w-full px-4 py-3 rounded-squircle bg-background-light dark:bg-background-dark text-text-primary-light dark:text-text-primary-dark placeholder-text-tertiary-light dark:placeholder-text-tertiary-dark border border-border-light dark:border-border-dark focus:outline-none focus:ring-2 focus:ring-accent-warm resize-none"
-                />
-              </div>
-
-              {/* Generate Button */}
-              <button
-                onClick={handleGenerate}
-                disabled={isAiLoading || !aiPrompt.trim()}
-                className="w-full py-3 rounded-squircle bg-accent-warm text-white font-medium hover:bg-accent-warm/90 transition-colors disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
-              >
-                {isAiLoading ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4" />
-                    Generate
-                  </>
-                )}
-              </button>
-
-              {/* Result */}
-              {aiResult && (
-                <motion.div
-                  initial={{ opacity: 0, y: 10 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  className="mt-6"
-                >
-                  <div className="flex items-center justify-between mb-3">
-                    <h3 className="text-sm font-semibold text-text-primary-light dark:text-text-primary-dark">
-                      Generated Response
-                    </h3>
-                    <button
-                      onClick={handleInsertAiResult}
-                      className="px-3 py-1.5 rounded-lg bg-accent-warm/10 text-accent-warm text-sm font-medium hover:bg-accent-warm/20 transition-colors"
-                    >
-                      Insert into Editor
-                    </button>
-                  </div>
-                  <div className="bg-card-light dark:bg-card-dark rounded-squircle p-4 text-sm text-text-primary-light dark:text-text-primary-dark leading-relaxed whitespace-pre-wrap">
-                    {aiResult}
-                  </div>
-                </motion.div>
-              )}
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <AiModal
+        isOpen={showAiModal}
+        onClose={() => setShowAiModal(false)}
+        editor={editor}
+        currentNoteId={currentNoteId}
+        isTauri={isTauri}
+      />
     </main>
   );
 }

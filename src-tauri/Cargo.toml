@@ -31,6 +31,8 @@ zip = "0.6"
 xml-rs = "0.8"
 pdf-extract = "0.8"
 unicode-segmentation = "1.11"
+# Secure credential storage (macOS Keychain / Windows Credential Manager / Linux Secret Service)
+keyring = "3"
 
 [features]
 default = ["custom-protocol"]

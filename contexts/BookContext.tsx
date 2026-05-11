@@ -32,11 +32,8 @@ interface BookContextType {
 
 const BookContext = createContext<BookContextType | undefined>(undefined);
 
-const STORAGE_KEY = 'trace_books';
-const CURRENT_BOOK_KEY = 'trace_current_book';
-
 function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+  return `demo-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
 }
 
 /** Convert Tauri Book (i64 id) to frontend Book (string id) */
@@ -58,6 +55,8 @@ function fileRecordToSourceFile(fr: FileRecord): SourceFile {
     extension: fr.extension,
     bookId: String(fr.book_id),
     addedAt: new Date(fr.created_at).getTime(),
+    status: fr.status,
+    error_message: fr.error_message,
   };
 }
 
@@ -79,13 +78,25 @@ export function BookProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  // Load books from Tauri backend or localStorage
+  // Load books from Tauri backend or set up browser demo
   useEffect(() => {
+    if (!isTauri) {
+      // Browser mode: ephemeral in-memory demo book only
+      const demoBook: Book = {
+        id: generateId(),
+        name: 'Demo Book',
+        createdAt: Date.now(),
+        files: [],
+      };
+      setBooks([demoBook]);
+      setCurrentBook(demoBook);
+      return;
+    }
+
     const loadFromTauri = async () => {
       try {
         const tauriBooks = await listBooks();
         if (tauriBooks.length === 0) {
-          // Create a default book
           const newId = await createBookTauri('My First Book');
           const frontendBook: Book = {
             id: String(newId),
@@ -105,13 +116,7 @@ export function BookProvider({ children }: { children: ReactNode }) {
 
         setBooks(frontendBooks);
         setBookIdMap(idMap);
-
-        // Load current book from localStorage, or use first
-        const savedBookId = localStorage.getItem(CURRENT_BOOK_KEY);
-        const target = savedBookId
-          ? frontendBooks.find((b) => b.id === savedBookId)
-          : frontendBooks[0];
-        setCurrentBook(target || frontendBooks[0]);
+        setCurrentBook(frontendBooks[0]);
 
         // Load files for each book
         for (const book of frontendBooks) {
@@ -127,70 +132,12 @@ export function BookProvider({ children }: { children: ReactNode }) {
         }
         setBooks([...frontendBooks]);
       } catch (error) {
-        console.error('Failed to load from Tauri backend, falling back to localStorage:', error);
-        loadFromLocalStorage();
+        console.error('Failed to load from Tauri backend:', error);
       }
     };
 
-    const loadFromLocalStorage = () => {
-      try {
-        const stored = localStorage.getItem(STORAGE_KEY);
-        const currentBookId = localStorage.getItem(CURRENT_BOOK_KEY);
-
-        if (stored) {
-          const loadedBooks: Book[] = JSON.parse(stored);
-          setBooks(loadedBooks);
-
-          if (currentBookId) {
-            const book = loadedBooks.find((b) => b.id === currentBookId);
-            setCurrentBook(book || loadedBooks[0] || null);
-          } else {
-            setCurrentBook(loadedBooks[0] || null);
-          }
-        } else {
-          const defaultBook: Book = {
-            id: generateId(),
-            name: 'My First Book',
-            createdAt: Date.now(),
-            files: [],
-          };
-          setBooks([defaultBook]);
-          setCurrentBook(defaultBook);
-          localStorage.setItem(STORAGE_KEY, JSON.stringify([defaultBook]));
-          localStorage.setItem(CURRENT_BOOK_KEY, defaultBook.id);
-        }
-      } catch (error) {
-        console.error('Failed to load books from localStorage:', error);
-      }
-    };
-
-    if (isTauri) {
-      loadFromTauri();
-    } else {
-      loadFromLocalStorage();
-    }
+    loadFromTauri();
   }, [isTauri]);
-
-  // Save books to localStorage (for browser mode fallback)
-  useEffect(() => {
-    if (!isTauri && books.length > 0) {
-      const booksToSave = books.map((book) => ({
-        ...book,
-        files: book.files.map((file) => {
-          const { file: _, ...fileWithoutBlob } = file;
-          return fileWithoutBlob;
-        }),
-      }));
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(booksToSave));
-    }
-  }, [books, isTauri]);
-
-  // Save current book ID
-  useEffect(() => {
-    if (currentBook) {
-      localStorage.setItem(CURRENT_BOOK_KEY, currentBook.id);
-    }
-  }, [currentBook]);
 
   const createBook = useCallback(
     async (name: string) => {

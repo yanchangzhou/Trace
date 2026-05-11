@@ -148,6 +148,7 @@ export default function FilePreviewPanel() {
                 headings: result.metadata.headings,
               },
               content_preview: preview,
+              full_text: result.text,
             };
             setParsedContent(parsed);
             applyParsedForPreview(parsed, currentFile);
@@ -177,6 +178,7 @@ export default function FilePreviewPanel() {
                 headings: [],
               },
               content_preview: userFriendlyMessage,
+              full_text: '',
             });
             setPreviewFile(currentFile.file ?? null);
             setIsLoading(false);

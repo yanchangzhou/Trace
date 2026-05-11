@@ -46,6 +46,7 @@ export interface ParsedDocument {
   summary: string;
   metadata: DocumentMetadata;
   content_preview: string;
+  full_text: string;
   /** From Tauri: raw file bytes for in-app preview (PDF / Office / text). */
   content_bytes?: number[];
 }
@@ -80,4 +81,6 @@ export interface SourceFile {
   bookId: string;
   addedAt: number;
   file?: File; // Store original File object for browser mode
+  status?: string; // 'importing' | 'ready' | 'failed' | 'active' (legacy)
+  error_message?: string;
 }

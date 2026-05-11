@@ -1,12 +1,13 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { FileText, Image, File, ChevronLeft, Upload, MoreVertical, Trash2, RefreshCw } from 'lucide-react';
+import { ChevronLeft, Upload, RefreshCw } from 'lucide-react';
 import { useSidebar, MIN_SIDEBAR_WIDTH, MAX_SIDEBAR_WIDTH } from '@/contexts/SidebarContext';
 import { useBook } from '@/contexts/BookContext';
 import { useFilePreview } from '@/contexts/FilePreviewContext';
 import { useEffect, useState, useCallback } from 'react';
 import BookSelector from './BookSelector';
+import FileCard from './source/FileCard';
 import { SourceFile } from '@/types';
 import { selectFiles, copyFileToBook, reindexFiles, getDocsFolder, deleteFile as deleteFileTauri } from '@/lib/tauri';
 
@@ -21,7 +22,6 @@ export default function SourceRail() {
   const { currentBook, addFileToBook, removeFileFromBook, getFilesForCurrentBook, refreshFiles, isTauri } = useBook();
   const { openPreview } = useFilePreview();
   const [isLoading, setIsLoading] = useState(false);
-  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [isResizing, setIsResizing] = useState(false);
 
   // Drag-to-resize effect
@@ -41,6 +41,31 @@ export default function SourceRail() {
       document.removeEventListener('mouseup', onMouseUp);
     };
   }, [isResizing, setExpandedWidth]);
+
+  // Listen for Tauri file-status-changed events
+  useEffect(() => {
+    if (!isTauri) return;
+    let unlisten: (() => void) | undefined;
+
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => {
+        listen<{ file_id: number; book_id: number; status: string; error_message: string }>(
+          'file-status-changed',
+          () => {
+            refreshFiles();
+          }
+        ).then((fn) => {
+          unlisten = fn;
+        });
+      })
+      .catch(() => {
+        /* event API not available */
+      });
+
+    return () => {
+      unlisten?.();
+    };
+  }, [isTauri, refreshFiles]);
 
   const handleResizeMouseDown = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -163,7 +188,6 @@ export default function SourceRail() {
     if (!confirmed) return;
 
     removeFileFromBook(currentBook.id, file.id);
-    setOpenMenuId(null);
 
     if (isTauri) {
       try {
@@ -181,28 +205,6 @@ export default function SourceRail() {
     setIsLoading(true);
     await refreshFiles();
     setIsLoading(false);
-  };
-
-  const getIcon = (extension: string) => {
-    const iconClass = "w-6 h-6";
-
-    switch (extension.toLowerCase()) {
-      case 'pdf':
-        return <FileText className={iconClass} />;
-      case 'pptx':
-      case 'ppt':
-        return <File className={iconClass} />;
-      case 'docx':
-      case 'doc':
-        return <File className={iconClass} />;
-      case 'png':
-      case 'jpg':
-      case 'jpeg':
-      case 'gif':
-        return <Image className={iconClass} />;
-      default:
-        return <File className={iconClass} />;
-    }
   };
 
   const files = getFilesForCurrentBook();
@@ -316,97 +318,14 @@ export default function SourceRail() {
                 className={`${isCollapsed ? 'space-y-3' : 'flex flex-col gap-2'}`}
               >
                 {files.map((file, index) => (
-                  <motion.div
+                  <FileCard
                     key={file.id}
-                    layout
-                    initial={{ y: 20, opacity: 0 }}
-                    animate={{ y: 0, opacity: 1 }}
-                    transition={{
-                      layout: springConfig,
-                      opacity: { duration: 0.3, delay: index * 0.05 },
-                      y: { ...springConfig, delay: index * 0.05 },
-                    }}
-                    whileHover={{ scale: 1.02, y: -1 }}
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      handleFileClick(file);
-                    }}
-                    className={`${
-                      isCollapsed ? 'w-full h-12' : 'w-full h-14'
-                    } bg-card-light dark:bg-card-dark rounded-squircle-sm cursor-pointer border border-border-light dark:border-border-dark hover:border-accent-warm/40 dark:hover:border-accent-warm/40 transition-colors duration-200 relative group flex-shrink-0`}
-                    title={file.name}
-                  >
-                    <motion.div
-                      layout
-                      className="flex items-center h-full w-full px-4 gap-3"
-                    >
-                      <motion.div
-                        layout
-                        className="flex items-center justify-center text-accent-warm flex-shrink-0"
-                      >
-                        {getIcon(file.extension)}
-                      </motion.div>
-
-                      <motion.div
-                        layout
-                        initial={false}
-                        animate={{
-                          opacity: isCollapsed ? 0 : 1,
-                          width: isCollapsed ? 0 : 'auto',
-                        }}
-                        transition={{
-                          type: 'spring',
-                          stiffness: 200,
-                          damping: 25,
-                          opacity: { duration: 0.2 },
-                        }}
-                        className="overflow-hidden flex-1 min-w-0"
-                      >
-                        <p className="text-xs font-medium text-text-primary-light dark:text-text-primary-dark truncate tracking-tight">
-                          {file.name}
-                        </p>
-                      </motion.div>
-                    </motion.div>
-
-                    {/* Three-dot menu */}
-                    {!isCollapsed && (
-                      <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setOpenMenuId(openMenuId === file.id ? null : file.id);
-                          }}
-                          className="w-6 h-6 rounded-lg bg-surface-light dark:bg-surface-dark hover:bg-background-light dark:hover:bg-background-dark flex items-center justify-center"
-                        >
-                          <MoreVertical className="w-3 h-3 text-text-secondary-light dark:text-text-secondary-dark" />
-                        </button>
-
-                        <AnimatePresence>
-                          {openMenuId === file.id && (
-                            <motion.div
-                              initial={{ opacity: 0, scale: 0.95, y: -5 }}
-                              animate={{ opacity: 1, scale: 1, y: 0 }}
-                              exit={{ opacity: 0, scale: 0.95, y: -5 }}
-                              transition={{ duration: 0.15 }}
-                              className="absolute mt-1 w-32 bg-card-light dark:bg-card-dark rounded-squircle-sm shadow-ambient-lg dark:shadow-ambient-lg-dark border border-border-light dark:border-border-dark overflow-hidden z-50"
-                              style={{
-                                top: '100%',
-                                right: '0',
-                              }}
-                            >
-                              <button
-                                onClick={(e) => handleDeleteFile(file, e)}
-                                className="w-full px-3 py-2 text-left text-sm text-red-500 hover:bg-background-light dark:hover:bg-background-dark transition-colors flex items-center gap-2"
-                              >
-                                <Trash2 className="w-3 h-3" />
-                                Delete
-                              </button>
-                            </motion.div>
-                          )}
-                        </AnimatePresence>
-                      </div>
-                    )}
-                  </motion.div>
+                    file={file}
+                    index={index}
+                    isCollapsed={isCollapsed}
+                    onFileClick={handleFileClick}
+                    onDelete={handleDeleteFile}
+                  />
                 ))}
               </motion.div>
             </AnimatePresence>
@@ -416,9 +335,12 @@ export default function SourceRail() {
         {/* Browser Mode Indicator */}
         {!isTauri && !isCollapsed && (
           <div className="absolute bottom-4 left-4 right-4">
-            <div className="bg-accent-warm/10 border border-accent-warm/20 rounded-lg px-3 py-2">
-              <p className="text-xs text-accent-warm text-center">
-                Browser Preview Mode
+            <div className="bg-amber-100 dark:bg-amber-900/30 border border-amber-400/60 dark:border-amber-600/40 rounded-lg px-3 py-2.5">
+              <p className="text-xs text-amber-700 dark:text-amber-300 text-center font-medium">
+                Browser UI Demo
+              </p>
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 text-center mt-1 leading-relaxed">
+                File upload, AI assist, and persistence require the Tauri desktop app.
               </p>
             </div>
           </div>
