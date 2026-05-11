@@ -14,7 +14,7 @@ use parser::ParsedDocument;
 use search::{ContentSearchResult, SearchEngine, SearchResult};
 use std::path::PathBuf;
 use std::sync::Arc;
-use tauri::Manager;
+use tauri::{Emitter, Manager};
 use window_vibrancy::{apply_vibrancy, NSVisualEffectMaterial};
 use watcher::FileWatcher;
 use db::Database;
@@ -150,6 +150,51 @@ async fn select_files(app: tauri::AppHandle) -> Result<Vec<String>, String> {
     }
 }
 
+fn process_imported_file(
+    db: Arc<Database>,
+    search_engine: Arc<SearchEngine>,
+    file_id: String,
+    file_path: PathBuf,
+    name: String,
+    path_str: String,
+    ext: String,
+) {
+    if let Err(e) = search_engine.index_file(&file_path) {
+        eprintln!("Failed to index file metadata: {}", e);
+    }
+
+    match parser::parse_to_text(&file_path) {
+        Ok(parsed) => {
+            let chunks = parser::split_into_chunks(&parsed.text, &file_id);
+            for chunk in &chunks {
+                let _ = search_engine.index_chunk(chunk, &name, &path_str, &ext);
+            }
+            let summary: String = parsed.text.chars().take(2048).collect();
+            let _ = db.upsert_document(&DocumentRecord {
+                file_id: file_id.clone(),
+                summary,
+                word_count: parsed.word_count,
+                page_count: None,
+                slide_count: None,
+                headings_json: "[]".to_string(),
+                parsed_at: std::time::SystemTime::now()
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs() as i64,
+            });
+            let _ = db.delete_chunks_for_file(&file_id);
+            let _ = db.insert_chunks(&chunks);
+            let _ = db.update_file_parse_status(&file_id, "ready", "ready", None);
+            let _ = search_engine.commit();
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            let _ = db.update_file_parse_status(&file_id, "failed", "failed", Some(&msg));
+            eprintln!("Failed to parse imported file: {}", msg);
+        }
+    }
+}
+
 #[tauri::command]
 async fn copy_file_to_book(file_path: String, book_id: String) -> Result<String, String> {
     let source = std::path::Path::new(&file_path);
@@ -178,34 +223,58 @@ async fn copy_file_to_book(file_path: String, book_id: String) -> Result<String,
     let search_engine = Arc::clone(&SEARCH_ENGINE);
     let db = Arc::clone(&DATABASE);
     let dest_path_clone = dest_path.clone();
-    tauri::async_runtime::spawn(async move {
-        if let Err(e) = search_engine.index_file(&dest_path_clone) {
-            eprintln!("Failed to index file: {}", e);
-        }
-        // Parse and chunk
-        if let Ok(parsed) = parser::parse_to_text(&dest_path_clone) {
-            let file_id = uuid::Uuid::new_v4().to_string();
-            let name = dest_path_clone.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
-            let ext = dest_path_clone.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
-            let path_str = dest_path_clone.to_string_lossy().to_string();
-            let metadata = std::fs::metadata(&dest_path_clone).unwrap();
-            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+    let file_id = uuid::Uuid::new_v4().to_string();
+    let name = dest_path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let ext = dest_path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    let path_str = dest_path.to_string_lossy().to_string();
+    let metadata = std::fs::metadata(&dest_path).map_err(|e| format!("Failed to inspect copied file: {}", e))?;
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
 
-            let _ = db.add_file(&FileRecord {
-                id: file_id.clone(), book_id: book_id.clone(), name: name.clone(),
-                path: path_str.clone(), extension: ext.clone(), size: metadata.len(),
-                hash: None, status: "ready".to_string(), created_at: now, updated_at: now,
-            });
-            let chunks = parser::split_into_chunks(&parsed.text, &file_id);
-            for chunk in &chunks {
-                let _ = search_engine.index_chunk(chunk, &name, &path_str, &ext);
-            }
-            let _ = db.insert_chunks(&chunks);
-            let _ = search_engine.commit();
-        }
+    db.add_file(&FileRecord {
+        id: file_id.clone(),
+        book_id: book_id.clone(),
+        name: name.clone(),
+        path: path_str.clone(),
+        extension: ext.clone(),
+        size: metadata.len(),
+        hash: None,
+        status: "importing".to_string(),
+        role: "source".to_string(),
+        parse_status: "parsing".to_string(),
+        parse_error: None,
+        created_at: now,
+        updated_at: now,
+    }).map_err(|e| e.to_string())?;
+
+    tauri::async_runtime::spawn(async move {
+        process_imported_file(db, search_engine, file_id, dest_path_clone, name, path_str, ext);
     });
 
     Ok(dest_path.to_string_lossy().to_string())
+}
+
+#[tauri::command]
+async fn retry_file_parse(file_id: String, file_path: String) -> Result<(), String> {
+    let path = PathBuf::from(&file_path);
+    if !path.exists() {
+        return Err(format!("File does not exist: {}", file_path));
+    }
+
+    DATABASE
+        .update_file_parse_status(&file_id, "importing", "parsing", None)
+        .map_err(|e| e.to_string())?;
+    DATABASE.delete_chunks_for_file(&file_id).ok();
+    SEARCH_ENGINE.remove_chunks_for_file(&file_id).ok();
+
+    let db = Arc::clone(&DATABASE);
+    let search_engine = Arc::clone(&SEARCH_ENGINE);
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
+    let ext = path.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
+    tauri::async_runtime::spawn(async move {
+        process_imported_file(db, search_engine, file_id, path, name, file_path, ext);
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
@@ -268,6 +337,15 @@ async fn delete_file(file_id: String, file_path: String, _book_id: String) -> Re
 }
 
 #[tauri::command]
+async fn update_file_role(file_id: String, role: String) -> Result<(), String> {
+    let allowed = ["source", "style_sample", "both"];
+    if !allowed.contains(&role.as_str()) {
+        return Err("Invalid file role. Expected source, style_sample, or both.".to_string());
+    }
+    DATABASE.update_file_role(&file_id, &role).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn get_file_detail(file_id: String) -> Result<Option<DocumentRecord>, String> {
     DATABASE.get_document(&file_id).map_err(|e| e.to_string())
 }
@@ -291,7 +369,11 @@ async fn sync_library() -> Result<usize, String> {
                 let _ = DATABASE.add_file(&FileRecord {
                     id: file_id.clone(), book_id: String::new(), name: name.clone(),
                     path: path_str.clone(), extension: ext.clone(), size: metadata.as_ref().map(|m| m.len()).unwrap_or(0),
-                    hash: None, status: "ready".to_string(), created_at: now, updated_at: now,
+                    hash: None, status: "ready".to_string(),
+                    role: "source".to_string(),
+                    parse_status: "ready".to_string(),
+                    parse_error: None,
+                    created_at: now, updated_at: now,
                 });
                 let chunks = parser::split_into_chunks(&parsed.text, &file_id);
                 for chunk in &chunks {
@@ -362,43 +444,156 @@ async fn list_notes_by_book(book_id: String) -> Result<Vec<Note>, String> {
 
 #[tauri::command]
 async fn build_ai_context(request: AIRequest) -> Result<String, String> {
-    ai::build_ai_context(&DATABASE, &request).map_err(|e| e.to_string())
+    ai::build_ai_context(&DATABASE, Some(&SEARCH_ENGINE), &request).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn save_api_key(key: String) -> Result<(), String> {
+    DATABASE.save_setting("openai_api_key", &key).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn get_api_key() -> Result<Option<String>, String> {
+    DATABASE.get_setting("openai_api_key").map_err(|e| e.to_string())
+}
+
+/// Fire-and-forget streaming command.
+/// Returns immediately after spawning the request. Tokens are delivered to the
+/// frontend via Tauri events named `ai-stream-{stream_id}` with payloads of
+/// type `AIStreamEvent` (see ai.rs).
+#[tauri::command]
+async fn stream_generate(
+    app: tauri::AppHandle,
+    request: AIRequest,
+    stream_id: String,
+) -> Result<(), String> {
+    let api_key = DATABASE
+        .get_setting("openai_api_key")
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No API key configured. Please add your API key in Settings.".to_string())?;
+
+    let prompt = ai::build_generation_prompt(&DATABASE, Some(&SEARCH_ENGINE), &request)
+        .map_err(|e| e.to_string())?;
+    let run = DATABASE
+        .create_generation_run(
+            &prompt.task_type,
+            request.style_profile_id.as_deref(),
+            &prompt.source_file_ids_json,
+            &prompt.model,
+            &prompt.prompt_json,
+            "streaming",
+        )
+        .map_err(|e| e.to_string())?;
+    let db = Arc::clone(&DATABASE);
+    let run_id = run.id.clone();
+    let system_prompt = prompt.system;
+    let user_message = prompt.user;
+    let model = prompt.model;
+    let base_url = prompt.base_url;
+
+    tauri::async_runtime::spawn(async move {
+        match
+            ai::stream_ai_response(
+                &app,
+                &api_key,
+                &base_url,
+                &model,
+                &system_prompt,
+                &user_message,
+                &stream_id,
+            )
+            .await
+        {
+            Ok(output) => {
+                let _ = db.finish_generation_run(&run_id, &output, "done");
+            }
+            Err(e) => {
+                let event_name = format!("ai-stream-{}", stream_id);
+                let message = e.to_string();
+                let _ = db.finish_generation_run(&run_id, &message, "error");
+                app.emit(
+                    &event_name,
+                    ai::AIStreamEvent::Error { message },
+                )
+                .ok();
+            }
+        }
+    });
+
+    Ok(())
 }
 
 #[tauri::command]
 async fn generate_with_context(request: AIRequest) -> Result<String, String> {
-    let context = ai::build_ai_context(&DATABASE, &request).map_err(|e| e.to_string())?;
-
-    // Build the system prompt
-    let action_prompt = match request.action.as_str() {
-        "summarize" => "Summarize the provided documents concisely.",
-        "compare" => "Compare the provided documents, highlighting similarities and differences.",
-        "outline" => "Generate a structured outline based on the provided documents.",
-        _ => "Answer the user's question based on the provided documents.",
-    };
-
-    let style_instruction = match request.style.as_deref() {
-        Some("academic") => "Use a formal, academic tone with precise terminology.",
-        Some("analytical") => "Use an analytical tone focused on data and logical reasoning.",
-        Some("concise") => "Be brief and direct. Use short sentences.",
-        Some("my_style") => "Match the user's writing style from their notes.",
-        _ => "Use a balanced, helpful tone.",
-    };
-
-    let system_prompt = format!(
-        "{}\n\nStyle: {}\n\nContext:\n{}",
-        action_prompt, style_instruction, context
-    );
-
-    // Return the assembled prompt — the frontend handles actual LLM calls
-    // In production, this would call the LLM API directly from the backend
-    Ok(system_prompt)
+    ai::build_generation_prompt(&DATABASE, Some(&SEARCH_ENGINE), &request)
+        .map(|prompt| prompt.system)
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
 async fn retry_generation(request: AIRequest) -> Result<String, String> {
-    // Regenerate with slightly different parameters
     generate_with_context(request).await
+}
+
+// ══════════════════════════════════════════════════════════════
+// Model Provider Settings
+// ══════════════════════════════════════════════════════════════
+
+#[tauri::command]
+async fn save_model_settings(provider: String, model_name: String, base_url: String) -> Result<(), String> {
+    DATABASE.save_setting("model_provider", &provider).map_err(|e| e.to_string())?;
+    DATABASE.save_setting("model_name", &model_name).map_err(|e| e.to_string())?;
+    DATABASE.save_setting("model_base_url", &base_url).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+async fn get_model_settings() -> Result<serde_json::Value, String> {
+    let provider = DATABASE.get_setting("model_provider").map_err(|e| e.to_string())?.unwrap_or_default();
+    let model_name = DATABASE.get_setting("model_name").map_err(|e| e.to_string())?.unwrap_or_else(|| "gpt-4o-mini".to_string());
+    let base_url = DATABASE.get_setting("model_base_url").map_err(|e| e.to_string())?.unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+    Ok(serde_json::json!({
+        "provider": provider,
+        "model_name": model_name,
+        "base_url": base_url,
+    }))
+}
+
+// ══════════════════════════════════════════════════════════════
+// LLM-Powered Style Analysis
+// ══════════════════════════════════════════════════════════════
+
+#[tauri::command]
+async fn analyze_style_with_llm(file_ids: Vec<String>, profile_name: String) -> Result<SavedStyleProfile, String> {
+    if file_ids.is_empty() {
+        return Err("Select at least one style sample file.".to_string());
+    }
+
+    let api_key = DATABASE
+        .get_setting("openai_api_key")
+        .map_err(|e| e.to_string())?
+        .ok_or_else(|| "No API key configured. Please add your API key in Settings.".to_string())?;
+
+    let base_url = DATABASE
+        .get_setting("model_base_url")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+    let model = DATABASE
+        .get_setting("model_name")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+
+    let (profile, examples) = style::analyze_style_with_llm(
+        &DATABASE, &file_ids, &api_key, &base_url, &model,
+    )
+    .await
+    .map_err(|e| e.to_string())?;
+
+    let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+    let scope = serde_json::to_string(&file_ids).map_err(|e| e.to_string())?;
+    DATABASE
+        .create_style_profile(&profile_name, &scope, Some("auto"), &profile_json, &examples)
+        .map_err(|e| e.to_string())
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -453,6 +648,36 @@ async fn get_style_profile(style: String) -> Result<Option<StyleProfile>, String
 #[tauri::command]
 async fn extract_my_style() -> Result<StyleProfile, String> {
     style::extract_style_profile(&DATABASE).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn create_style_profile_from_samples(name: String, file_ids: Vec<String>) -> Result<SavedStyleProfile, String> {
+    if file_ids.is_empty() {
+        return Err("Select at least one style sample file.".to_string());
+    }
+
+    let (profile, examples) = style::extract_style_profile_from_files(&DATABASE, &file_ids)
+        .map_err(|e| e.to_string())?;
+    let profile_json = serde_json::to_string_pretty(&profile).map_err(|e| e.to_string())?;
+    let scope = serde_json::to_string(&file_ids).map_err(|e| e.to_string())?;
+    DATABASE
+        .create_style_profile(&name, &scope, Some("auto"), &profile_json, &examples)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn list_style_profiles() -> Result<Vec<SavedStyleProfile>, String> {
+    DATABASE.list_style_profiles().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn update_saved_style_profile(profile_id: String, name: String, profile_json: String) -> Result<(), String> {
+    DATABASE.update_style_profile(&profile_id, &name, &profile_json).map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn delete_style_profile(profile_id: String) -> Result<(), String> {
+    DATABASE.delete_style_profile(&profile_id).map_err(|e| e.to_string())
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -522,6 +747,7 @@ fn main() {
             delete_book_folder,
             select_files,
             copy_file_to_book,
+            retry_file_parse,
             list_book_files,
             // Stage 1: Books & Files
             list_books,
@@ -530,6 +756,7 @@ fn main() {
             delete_book,
             list_files_by_book,
             delete_file,
+            update_file_role,
             get_file_detail,
             sync_library,
             // Stage 2: Content Search
@@ -543,6 +770,9 @@ fn main() {
             get_note,
             list_notes_by_book,
             build_ai_context,
+            save_api_key,
+            get_api_key,
+            stream_generate,
             generate_with_context,
             retry_generation,
             // Stage 4: Versions & Sessions
@@ -555,6 +785,14 @@ fn main() {
             // Stage 5: Style
             get_style_profile,
             extract_my_style,
+            create_style_profile_from_samples,
+            list_style_profiles,
+            update_saved_style_profile,
+            delete_style_profile,
+            analyze_style_with_llm,
+            // Model provider settings
+            save_model_settings,
+            get_model_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

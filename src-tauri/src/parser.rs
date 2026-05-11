@@ -334,14 +334,65 @@ pub fn parse_to_text(file_path: &Path) -> Result<ParsedText> {
         "pptx" => extract_pptx_text(file_path),
         "txt" | "md" => extract_raw_text(file_path),
         "pdf" => {
-            // PDF text extraction is limited without a PDF library
-            let bytes = std::fs::read(file_path)?;
-            let text = String::from_utf8_lossy(&bytes).to_string();
+            let text = pdf_extract::extract_text(file_path).or_else(|_| {
+                let bytes = std::fs::read(file_path)?;
+                Ok::<_, anyhow::Error>(extract_pdf_literal_text(&bytes))
+            })?;
             let word_count = text.split_whitespace().count();
-            Ok(ParsedText { text: text.chars().take(10000).collect(), word_count })
+            if text.trim().is_empty() {
+                Err(anyhow::anyhow!(
+                    "PDF text extraction produced no usable text. Preview still works, but this file cannot be used as AI context yet."
+                ))
+            } else {
+                Ok(ParsedText { text: text.chars().take(10000).collect(), word_count })
+            }
         }
         _ => Err(anyhow::anyhow!("Unsupported file type: {}", extension)),
     }
+}
+
+fn extract_pdf_literal_text(bytes: &[u8]) -> String {
+    // Minimal fallback extractor for simple PDFs with uncompressed literal strings.
+    // It intentionally avoids treating the full binary file as UTF-8 content.
+    let raw = String::from_utf8_lossy(bytes);
+    let mut text = String::new();
+    let mut in_literal = false;
+    let mut escaped = false;
+    let mut current = String::new();
+
+    for ch in raw.chars() {
+        if in_literal {
+            if escaped {
+                current.push(match ch {
+                    'n' => '\n',
+                    'r' => '\n',
+                    't' => '\t',
+                    other => other,
+                });
+                escaped = false;
+                continue;
+            }
+
+            match ch {
+                '\\' => escaped = true,
+                ')' => {
+                    let trimmed = current.trim();
+                    if trimmed.len() > 2 && trimmed.chars().any(|c| c.is_alphabetic() || ('\u{4e00}'..='\u{9fff}').contains(&c)) {
+                        text.push_str(trimmed);
+                        text.push('\n');
+                    }
+                    current.clear();
+                    in_literal = false;
+                }
+                _ => current.push(ch),
+            }
+        } else if ch == '(' {
+            in_literal = true;
+            current.clear();
+        }
+    }
+
+    text
 }
 
 fn extract_docx_text(file_path: &Path) -> Result<ParsedText> {
@@ -505,5 +556,25 @@ pub fn get_file_summary(file_path: &Path) -> String {
             eprintln!("Failed to parse {:?}: {}", file_path, e);
             "Unable to parse".to_string()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::split_into_chunks;
+
+    #[test]
+    fn split_into_chunks_returns_empty_for_empty_text() {
+        assert!(split_into_chunks("", "file-1").is_empty());
+    }
+
+    #[test]
+    fn split_into_chunks_keeps_utf8_text_intact() {
+        let text = "第一段中文内容。".repeat(300);
+        let chunks = split_into_chunks(&text, "file-1");
+
+        assert!(!chunks.is_empty());
+        assert!(chunks.iter().all(|chunk| chunk.file_id == "file-1"));
+        assert!(chunks.iter().all(|chunk| !chunk.text.is_empty()));
     }
 }

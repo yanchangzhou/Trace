@@ -22,6 +22,16 @@ export interface StyleProfile {
   constraints: StyleConstraint[];
 }
 
+export interface SavedStyleProfile {
+  id: string;
+  name: string;
+  source_scope: string;
+  language?: string | null;
+  profile_json: string;
+  created_at: number;
+  updated_at: number;
+}
+
 export interface StyleConstraint {
   name: string;
   value: string;
@@ -33,6 +43,14 @@ export interface AIRequest {
   context_file_ids: string[];
   style?: WritingStyle;
   prompt?: string;
+  task_type?: 'wechat_article' | 'long_email' | 'course_paper' | string;
+  style_profile_id?: string;
+  output_mode?: 'outline' | 'draft' | 'rewrite' | 'polish' | string;
+  audience?: string;
+  goal?: string;
+  length?: string;
+  language?: string;
+  constraints?: string[];
 }
 
 export interface AIStreamEvent {

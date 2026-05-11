@@ -25,11 +25,13 @@ const textColors = ['#2F3437', '#787774', '#9F6B53', '#7A5E3B', '#4F7A57', '#4D6
 const highlightColors = ['#FFF3BF', '#FFE3E3', '#D3F9D8', '#D0EBFF', '#E5DBFF', '#FFE8CC'];
 
 interface EditorToolbarProps {
-  editor: Editor;
+  editor: Editor | null;
 }
 
 export default function EditorToolbar({ editor }: EditorToolbarProps) {
   const [showColorPanel, setShowColorPanel] = useState(false);
+
+  if (!editor) return null;
   const [showHighlightPanel, setShowHighlightPanel] = useState(false);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
   const bubbleRef = useRef<HTMLDivElement | null>(null);

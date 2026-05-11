@@ -50,7 +50,6 @@ pub struct ContentSearchResult {
 /// The search engine powered by Tantivy with storage optimization
 pub struct SearchEngine {
     index: Index,
-    schema: Schema,
     writer: Arc<Mutex<IndexWriter>>,
     name_field: Field,
     path_field: Field,
@@ -138,7 +137,6 @@ impl SearchEngine {
         
         Ok(Self {
             index,
-            schema,
             writer: Arc::new(Mutex::new(writer)),
             name_field,
             path_field,
@@ -177,7 +175,6 @@ impl SearchEngine {
         
         let size = metadata.len();
         
-        // Current timestamp for last_accessed
         let _now = SystemTime::now()
             .duration_since(UNIX_EPOCH)?
             .as_secs() as i64;
@@ -291,25 +288,6 @@ impl SearchEngine {
         
         Ok(deleted_count)
     }
-    
-    /// Update last_accessed timestamp when file is searched/opened
-    pub fn touch_file(&self, file_path: &str) -> Result<()> {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)?
-            .as_secs() as i64;
-        
-        // Remove old entry
-        let path_term = Term::from_field_text(self.path_field, file_path);
-        let writer = self.writer.lock().unwrap();
-        writer.delete_term(path_term);
-        
-        // Re-index with updated timestamp
-        // (In production, you'd want to update in place, but Tantivy doesn't support updates)
-        // This is a simplified approach
-        
-        Ok(())
-    }
-    
     /// Search files with fuzzy matching
     pub fn search(&self, query_str: &str, limit: usize) -> Result<Vec<SearchResult>> {
         let reader = self

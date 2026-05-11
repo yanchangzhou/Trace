@@ -3,9 +3,9 @@
   "version": "0.1.0",
   "identifier": "com.trace.app",
   "build": {
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build",
-    "devUrl": "http://localhost:3000",
+    "beforeDevCommand": "npm run dev -- --port 1420",
+    "beforeBuildCommand": "npm run build",
+    "devUrl": "http://localhost:1420/en",
     "frontendDist": "../.next"
   },
   "app": {

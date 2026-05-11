@@ -11,13 +11,12 @@ import Link from '@tiptap/extension-link';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
-import BubbleMenuExtension from '@tiptap/extension-bubble-menu';
 import Placeholder from '@tiptap/extension-placeholder';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useFilePreview } from '@/contexts/FilePreviewContext';
 import { useEditorContext } from '@/contexts/EditorContext';
 import { useBook } from '@/contexts/BookContext';
-import { createNote, updateNote } from '@/lib/tauri';
+import { createNote, updateNote, isTauriEnvironment } from '@/lib/tauri';
 import EditorToolbar from './EditorToolbar';
 import { SlashCommand } from './suggestion';
 import { BlockDragExtension } from './BlockDragExtension';
@@ -41,13 +40,20 @@ export default function EditorShell() {
     setSaveStatus,
     toggleAIPanel,
     registerInsertHandler,
+    registerAIInsertHandler,
+    registerAIReplaceHandler,
+    registerAIGetSelectionHandler,
     lastSavedAt,
     markSaved,
+    pendingNoteLoad,
+    clearPendingNoteLoad,
   } = useEditorContext();
 
   const [plainText, setPlainText] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track the last persisted note ID so title-change autosave only fires
+  // after the note exists in the DB.
+  const savedNoteIdRef = useRef<string | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -61,13 +67,6 @@ export default function EditorShell() {
         openOnClick: false,
         autolink: true,
         defaultProtocol: 'https',
-      }),
-      BubbleMenuExtension.configure({
-        shouldShow: ({ editor: e, state }) => {
-          const { from, to, empty } = state.selection;
-          const hasText = e.state.doc.textBetween(from, to, ' ').trim().length > 0;
-          return e.isFocused && !empty && hasText;
-        },
       }),
       Placeholder.configure({
         placeholder: 'Start writing your thoughts...',
@@ -94,20 +93,30 @@ export default function EditorShell() {
   const wordCount = useMemo(() => plainText.split(/\s+/).filter(Boolean).length, [plainText]);
   const charCount = plainText.length;
 
-  // Auto-save: debounce save after content changes
+  // Auto-save: debounce save after content or title changes.
   const doSave = useCallback(async () => {
+    // Browser mode: no Tauri backend, silently mark as saved to prevent error state.
+    if (!isTauriEnvironment()) {
+      markSaved();
+      return;
+    }
     if (!editor) return;
     const contentJson = JSON.stringify(editor.getJSON());
     const text = editor.getText();
-    if (!text.trim() && !noteId) return; // Don't save empty new notes
+    // Read from refs so the closure always sees the latest values.
+    const currentNoteId = noteId;
+    const currentTitle = noteTitle;
+    if (!text.trim() && !currentNoteId) return;
 
     setSaveStatus('saving');
     try {
-      if (noteId) {
-        await updateNote(noteId, noteTitle, contentJson, text);
+      if (currentNoteId) {
+        await updateNote(currentNoteId, currentTitle, contentJson, text);
+        savedNoteIdRef.current = currentNoteId;
       } else if (currentBook) {
-        const note = await createNote(currentBook.id, noteTitle, contentJson, text);
+        const note = await createNote(currentBook.id, currentTitle, contentJson, text);
         setNoteId(note.id);
+        savedNoteIdRef.current = note.id;
       }
       markSaved();
     } catch (error) {
@@ -116,28 +125,40 @@ export default function EditorShell() {
     }
   }, [editor, noteId, noteTitle, currentBook, setNoteId, setSaveStatus, markSaved]);
 
+  // Trigger autosave whenever content becomes "unsaved".
   useEffect(() => {
     if (saveStatus !== 'unsaved') return;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      doSave();
-    }, 1500);
-    return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    };
+    const timer = setTimeout(() => void doSave(), 1500);
+    return () => clearTimeout(timer);
   }, [saveStatus, doSave]);
 
-  // Save on title change
+  // Trigger autosave on title change — but only after the note already exists in the DB.
   useEffect(() => {
-    if (!noteId) return;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      doSave();
-    }, 1500);
-    return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    };
-  }, [noteTitle]);
+    if (!savedNoteIdRef.current) return;
+    const timer = setTimeout(() => void doSave(), 1500);
+    return () => clearTimeout(timer);
+  }, [noteTitle, doSave]);
+
+  // Load a note when EditorContext signals one (e.g. user clicked a note in the list).
+  useEffect(() => {
+    if (!pendingNoteLoad || !editor) return;
+
+    const { id, title, contentJson } = pendingNoteLoad;
+
+    setNoteId(id || null);
+    savedNoteIdRef.current = id || null;
+    setNoteTitle(title);
+
+    try {
+      const content = contentJson ? JSON.parse(contentJson) : null;
+      editor.commands.setContent(content ?? '<p></p>');
+    } catch {
+      editor.commands.setContent('<p></p>');
+    }
+
+    setSaveStatus('saved');
+    clearPendingNoteLoad();
+  }, [pendingNoteLoad, editor, setNoteId, setNoteTitle, setSaveStatus, clearPendingNoteLoad]);
 
   // Register insert reference handler for preview panel
   useEffect(() => {
@@ -163,6 +184,34 @@ export default function EditorShell() {
     });
     return () => registerInsertHandler(null);
   }, [editor, registerInsertHandler]);
+
+  // Register AI insert handler — inserts generated text at cursor
+  useEffect(() => {
+    if (!editor) return;
+    registerAIInsertHandler((text: string) => {
+      editor.chain().focus().insertContent(text).run();
+    });
+    return () => registerAIInsertHandler(null);
+  }, [editor, registerAIInsertHandler]);
+
+  // Register AI replace handler — replaces selected text
+  useEffect(() => {
+    if (!editor) return;
+    registerAIReplaceHandler((text: string) => {
+      editor.chain().focus().deleteSelection().insertContent(text).run();
+    });
+    return () => registerAIReplaceHandler(null);
+  }, [editor, registerAIReplaceHandler]);
+
+  // Register AI get selection handler
+  useEffect(() => {
+    registerAIGetSelectionHandler(() => {
+      if (!editor) return '';
+      const { from, to } = editor.state.selection;
+      return editor.state.doc.textBetween(from, to, ' ');
+    });
+    return () => registerAIGetSelectionHandler(null);
+  }, [editor, registerAIGetSelectionHandler]);
 
   const saveStatusLabel = saveStatus === 'saved'
     ? lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Saved'
@@ -209,6 +258,11 @@ export default function EditorShell() {
             <BubbleMenu
               editor={editor}
               options={{ placement: 'top' }}
+              shouldShow={({ editor: e, state }) => {
+                if (!e?.isEditable || !e.isFocused || !state?.selection) return false;
+                const { from, to, empty } = state.selection;
+                return !empty && e.state.doc.textBetween(from, to, ' ').trim().length > 0;
+              }}
               updateDelay={80}
               appendTo={() => document.body}
             >

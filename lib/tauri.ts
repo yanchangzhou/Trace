@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import type { Book, SourceFile, ContentSearchResult, DocumentChunk, Note, NoteSource, AIRequest } from '@/types';
+import type { Book, SourceFile, ContentSearchResult, DocumentChunk, Note, AIRequest, SavedStyleProfile } from '@/types';
 
 export interface SearchResult {
   name: string;
@@ -29,6 +29,9 @@ interface TauriFileRecord {
   updated_at?: number | string;
   size?: number;
   status?: string;
+  role?: 'source' | 'style_sample' | 'both';
+  parse_status?: 'pending' | 'parsing' | 'ready' | 'failed';
+  parse_error?: string | null;
 }
 
 const CURRENT_BOOK_KEY = 'trace_current_book';
@@ -66,6 +69,9 @@ function normalizeFileRecord(file: TauriFileRecord, bookId: string): SourceFile 
     addedAt: normalizeTimestamp(file.added_at || file.created_at || file.updated_at),
     size: file.size,
     status: file.status,
+    role: file.role || 'source',
+    parseStatus: file.parse_status || (file.status === 'ready' ? 'ready' : 'pending'),
+    parseError: file.parse_error ?? null,
   };
 }
 
@@ -91,32 +97,56 @@ function extractBookIdFromPath(path: string, docsFolder: string): string | null 
   return bookId || null;
 }
 
+export function isTauriEnvironment(): boolean {
+  if (typeof window === 'undefined') return false;
+  const w = window as Window & { __TAURI__?: unknown; __TAURI_INTERNALS__?: unknown };
+  return Boolean(w.__TAURI_INTERNALS__ || w.__TAURI__);
+}
+
 async function invokeOptional<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
   try {
     return await invoke<T>(command, args);
   } catch (error) {
-    console.warn(`Tauri command \"${command}\" unavailable or failed`, error);
+    // Browser (non-Tauri) failures are expected and should not flood the console.
+    if (isTauriEnvironment()) {
+      console.warn(`Tauri command "${command}" unavailable or failed`, error);
+    }
     return null;
   }
 }
 
-export function isTauriEnvironment(): boolean {
-  return typeof window !== 'undefined' && Boolean((window as { __TAURI__?: unknown }).__TAURI__);
-}
-
 export async function searchLocalFiles(query: string): Promise<SearchResult[]> {
+  if (!isTauriEnvironment()) return [];
   return await invoke<SearchResult[]>('search_local_files', { query });
 }
 
 export async function getDocsFolder(): Promise<string> {
+  if (!isTauriEnvironment()) return '';
   return await invoke<string>('get_docs_folder');
 }
 
 export async function reindexFiles(): Promise<number> {
+  if (!isTauriEnvironment()) return 0;
   return await invoke<number>('reindex_files');
 }
 
+export async function selectFiles(): Promise<string[]> {
+  if (!isTauriEnvironment()) return [];
+  return await invoke<string[]>('select_files');
+}
+
+export async function copyFileToBook(filePath: string, bookId: string): Promise<string> {
+  if (!isTauriEnvironment()) throw new Error('copyFileToBook requires the desktop app');
+  return await invoke<string>('copy_file_to_book', { filePath, bookId });
+}
+
+export async function retryFileParse(fileId: string, filePath: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invoke<void>('retry_file_parse', { fileId, filePath });
+}
+
 export async function openFile(path: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
   return await invoke<void>('open_file', { path });
 }
 
@@ -144,6 +174,9 @@ export async function listFilesByBook(bookId: string): Promise<SourceFile[]> {
     addedAt: file.last_modified * 1000,
     size: file.size,
     status: 'ready',
+    role: 'source',
+    parseStatus: 'ready',
+    parseError: null,
   }));
 }
 
@@ -176,6 +209,9 @@ export async function listBooks(): Promise<Book[]> {
       addedAt: file.last_modified * 1000,
       size: file.size,
       status: 'ready',
+      role: 'source',
+      parseStatus: 'ready',
+      parseError: null,
     });
     filesByBook.set(bookId, fileList);
   }
@@ -249,6 +285,11 @@ export async function deleteLibraryFile(file: SourceFile): Promise<void> {
   }
 }
 
+export async function updateLibraryFileRole(fileId: string, role: 'source' | 'style_sample' | 'both'): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  await invoke<void>('update_file_role', { fileId, role });
+}
+
 export async function syncLibrary(): Promise<void> {
   const synced = await invokeOptional<unknown>('sync_library');
   if (synced !== null) {
@@ -282,14 +323,17 @@ export function storeCurrentBookId(bookId: string | null): void {
 // ── Stage 2: Content search & document retrieval ──
 
 export async function searchDocuments(query: string, scope?: string): Promise<ContentSearchResult[]> {
+  if (!isTauriEnvironment()) return [];
   return await invoke<ContentSearchResult[]>('search_documents', { query, scope });
 }
 
 export async function getDocumentChunks(fileId: string): Promise<DocumentChunk[]> {
+  if (!isTauriEnvironment()) return [];
   return await invoke<DocumentChunk[]>('get_document_chunks', { fileId });
 }
 
 export async function summarizeDocument(fileId: string): Promise<string> {
+  if (!isTauriEnvironment()) return '';
   return await invoke<string>('summarize_document', { fileId });
 }
 
@@ -298,42 +342,101 @@ export async function getIndexStats(): Promise<{
   total_chunks: number;
   index_size_bytes: number;
   last_indexed_at: number;
-}> {
+} | null> {
+  if (!isTauriEnvironment()) return null;
   return await invoke('get_index_stats');
 }
 
 // ── Stage 3: Notes & AI ──
 
 export async function createNote(bookId: string, title: string, contentJson: string, plainText: string): Promise<Note> {
+  if (!isTauriEnvironment()) throw new Error('createNote requires the desktop app');
   return await invoke<Note>('create_note', { bookId, title, contentJson, plainText });
 }
 
 export async function updateNote(noteId: string, title: string, contentJson: string, plainText: string): Promise<Note> {
+  if (!isTauriEnvironment()) throw new Error('updateNote requires the desktop app');
   return await invoke<Note>('update_note', { noteId, title, contentJson, plainText });
 }
 
 export async function getNote(noteId: string): Promise<Note> {
+  if (!isTauriEnvironment()) throw new Error('getNote requires the desktop app');
   return await invoke<Note>('get_note', { noteId });
 }
 
 export async function listNotesByBook(bookId: string): Promise<Note[]> {
+  if (!isTauriEnvironment()) return [];
   return await invoke<Note[]>('list_notes_by_book', { bookId });
 }
 
 export async function buildAIContext(request: AIRequest): Promise<string> {
+  if (!isTauriEnvironment()) return '';
   return await invoke<string>('build_ai_context', { request });
 }
 
-export async function generateWithContext(
+// ── API key management ──
+
+export async function saveApiKey(key: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>('save_api_key', { key });
+}
+
+export async function getApiKey(): Promise<string | null> {
+  return await invokeOptional<string>('get_api_key');
+}
+
+// ── Real streaming AI via Tauri events ──
+// The Rust command `stream_generate` fires and returns immediately.
+// Actual tokens arrive as events named `ai-stream-{streamId}`.
+
+/** Shape of the Tauri event payload from the Rust stream_generate command. */
+export interface TauriStreamPayload {
+  type: 'token' | 'done' | 'error';
+  content?: string;
+  message?: string;
+}
+
+/**
+ * Start a streaming AI generation. Returns a cancel function.
+ * Calls onToken for each token, onDone when complete, onError on failure.
+ */
+export async function streamGenerate(
   request: AIRequest,
   onToken: (token: string) => void,
-  onSource: (source: import('@/types').AISource) => void,
-): Promise<string> {
-  return await invoke<string>('generate_with_context', {
-    request,
-    onToken,
-    onSource,
-  });
+  onDone: () => void,
+  onError: (message: string) => void,
+): Promise<() => void> {
+  if (!isTauriEnvironment()) {
+    onError('AI generation requires the desktop app.');
+    return () => {};
+  }
+
+  const streamId = crypto.randomUUID();
+  const eventName = `ai-stream-${streamId}`;
+  let unlisten: (() => void) | undefined;
+
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    unlisten = await listen<TauriStreamPayload>(eventName, (event) => {
+      const payload = event.payload;
+      if (payload.type === 'token' && payload.content) {
+        onToken(payload.content);
+      } else if (payload.type === 'done') {
+        unlisten?.();
+        onDone();
+      } else if (payload.type === 'error') {
+        unlisten?.();
+        onError(payload.message ?? 'Unknown error');
+      }
+    });
+    await invoke<void>('stream_generate', { request, streamId });
+  } catch (err) {
+    unlisten?.();
+    onError(err instanceof Error ? err.message : String(err));
+    return () => {};
+  }
+
+  return () => unlisten?.();
 }
 
 // ── Stage 5: Style profiles ──
@@ -344,6 +447,46 @@ export async function getStyleProfile(style: string): Promise<import('@/types').
 
 export async function extractMyStyle(): Promise<import('@/types').StyleProfile | null> {
   return await invokeOptional<import('@/types').StyleProfile>('extract_my_style');
+}
+
+export async function createStyleProfileFromSamples(name: string, fileIds: string[]): Promise<SavedStyleProfile | null> {
+  return await invokeOptional<SavedStyleProfile>('create_style_profile_from_samples', { name, fileIds });
+}
+
+export async function listSavedStyleProfiles(): Promise<SavedStyleProfile[]> {
+  if (!isTauriEnvironment()) return [];
+  return await invoke<SavedStyleProfile[]>('list_style_profiles');
+}
+
+export async function updateSavedStyleProfile(profileId: string, name: string, profileJson: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>('update_saved_style_profile', { profileId, name, profileJson });
+}
+
+export async function deleteSavedStyleProfile(profileId: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>('delete_style_profile', { profileId });
+}
+
+// ── LLM-Powered Style Analysis ──
+
+export async function analyzeStyleWithLLM(fileIds: string[], profileName: string): Promise<SavedStyleProfile | null> {
+  return await invokeOptional<SavedStyleProfile>('analyze_style_with_llm', { fileIds, profileName });
+}
+
+// ── Model Provider Settings ──
+
+export async function saveModelSettings(provider: string, modelName: string, baseUrl: string): Promise<void> {
+  if (!isTauriEnvironment()) return;
+  return await invoke<void>('save_model_settings', { provider, modelName, baseUrl });
+}
+
+export async function getModelSettings(): Promise<{
+  provider: string;
+  model_name: string;
+  base_url: string;
+} | null> {
+  return await invokeOptional('get_model_settings');
 }
 
 export function formatFileSize(bytes: number): string {

@@ -1,4 +1,4 @@
-use anyhow::Result;
+use anyhow::{anyhow, Result};
 use std::collections::HashMap;
 use crate::db::Database;
 use crate::models::*;
@@ -11,13 +11,6 @@ pub fn extract_style_profile(db: &Database) -> Result<StyleProfile> {
     let mut all_text = String::new();
     let mut all_plain_texts: Vec<String> = Vec::new();
 
-    // We need to query notes directly - simplified via DB
-    // Use the notes table to gather text
-    let _notes = db.list_notes_by_book("")?; // will be filtered differently in practice
-
-    // Since listing by empty book_id is unlikely to work well,
-    // we use a direct approach: iterate all books and gather notes
-    // For now, we'll build profile from whatever notes we can get
     let books = db.list_books()?;
     for book in &books {
         let book_notes = db.list_notes_by_book(&book.id)?;
@@ -186,6 +179,144 @@ pub fn extract_style_profile(db: &Database) -> Result<StyleProfile> {
     })
 }
 
+/// Extract a style profile from selected source files. This is the product path
+/// for user-uploaded writing samples; notes remain a fallback for "my_style".
+pub fn extract_style_profile_from_files(db: &Database, file_ids: &[String]) -> Result<(StyleProfile, Vec<StyleExample>)> {
+    let mut all_text = String::new();
+    let mut examples = Vec::new();
+
+    for file_id in file_ids {
+        let chunks = db.get_chunks(file_id)?;
+        for chunk in chunks.iter().take(6) {
+            let snippet = chunk.text.trim();
+            if snippet.is_empty() {
+                continue;
+            }
+
+            all_text.push_str(snippet);
+            all_text.push_str("\n\n");
+
+            if examples.len() < 8 {
+                examples.push(StyleExample {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    profile_id: String::new(),
+                    file_id: Some(file_id.clone()),
+                    note_id: None,
+                    text: snippet.chars().take(600).collect(),
+                    tags_json: "[\"sample\"]".to_string(),
+                });
+            }
+        }
+    }
+
+    if all_text.trim().is_empty() {
+        return Ok((
+            StyleProfile {
+                style: "my_style".to_string(),
+                label: "Uploaded Sample Style".to_string(),
+                description: "No usable text was found in the selected samples.".to_string(),
+                constraints: vec![],
+            },
+            examples,
+        ));
+    }
+
+    let profile = extract_style_profile_from_text(&all_text, file_ids.len());
+    Ok((profile, examples))
+}
+
+fn extract_style_profile_from_text(text: &str, sample_count: usize) -> StyleProfile {
+    let sentences: Vec<&str> = text
+        .split(|c| c == '.' || c == '!' || c == '?' || c == '。' || c == '！' || c == '？')
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    let total_words = text.split_whitespace().count();
+    let avg_sentence_len = if sentences.is_empty() {
+        0.0
+    } else {
+        total_words as f64 / sentences.len() as f64
+    };
+
+    let paragraphs: Vec<&str> = text.split("\n\n").filter(|p| !p.trim().is_empty()).collect();
+    let avg_para_len = if paragraphs.is_empty() {
+        0.0
+    } else {
+        paragraphs
+            .iter()
+            .map(|p| p.split_whitespace().count())
+            .sum::<usize>() as f64
+            / paragraphs.len() as f64
+    };
+
+    let question_count = text.matches('?').count() + text.matches('？').count();
+    let exclamation_count = text.matches('!').count() + text.matches('！').count();
+    let colon_count = text.matches(':').count() + text.matches('：').count();
+
+    let mut word_freq: HashMap<String, usize> = HashMap::new();
+    for word in text.to_lowercase().split_whitespace() {
+        let cleaned: String = word.chars().filter(|c| c.is_alphanumeric()).collect();
+        if cleaned.len() > 2 {
+            *word_freq.entry(cleaned).or_insert(0) += 1;
+        }
+    }
+    let mut freq_vec: Vec<(String, usize)> = word_freq.into_iter().collect();
+    freq_vec.sort_by(|a, b| b.1.cmp(&a.1));
+    let top_words = freq_vec
+        .iter()
+        .take(12)
+        .map(|(word, count)| format!("{} ({}x)", word, count))
+        .collect::<Vec<_>>()
+        .join(", ");
+
+    let tone = if avg_sentence_len > 24.0 {
+        "Long-form / explanatory"
+    } else if question_count > sentences.len().saturating_div(8) {
+        "Conversational / question-led"
+    } else if exclamation_count > sentences.len().saturating_div(10) {
+        "Expressive / emphatic"
+    } else {
+        "Direct / controlled"
+    };
+
+    StyleProfile {
+        style: "my_style".to_string(),
+        label: "Uploaded Sample Style".to_string(),
+        description: format!(
+            "Style profile extracted from {} uploaded sample file(s), {} paragraphs, {} sentences.",
+            sample_count,
+            paragraphs.len(),
+            sentences.len()
+        ),
+        constraints: vec![
+            StyleConstraint {
+                name: "Average sentence length".to_string(),
+                value: format!("{:.0} words", avg_sentence_len),
+                explanation: "Use this as a rhythm target when generating drafts.".to_string(),
+            },
+            StyleConstraint {
+                name: "Average paragraph length".to_string(),
+                value: format!("{:.0} words", avg_para_len),
+                explanation: "Approximate paragraph size found in uploaded samples.".to_string(),
+            },
+            StyleConstraint {
+                name: "Tone".to_string(),
+                value: tone.to_string(),
+                explanation: "Heuristic tone inferred from sentence rhythm and punctuation.".to_string(),
+            },
+            StyleConstraint {
+                name: "Frequent words".to_string(),
+                value: top_words,
+                explanation: "Candidate recurring terms from the sample set; review before using as hard rules.".to_string(),
+            },
+            StyleConstraint {
+                name: "Punctuation habits".to_string(),
+                value: format!("questions: {}, exclamations: {}, colons: {}", question_count, exclamation_count, colon_count),
+                explanation: "Useful for avoiding a generated draft that feels structurally unlike the samples.".to_string(),
+            },
+        ],
+    }
+}
+
 /// Get a predefined style profile
 pub fn get_style_profile(style: &str) -> Result<Option<StyleProfile>> {
     match style {
@@ -278,5 +409,277 @@ pub fn get_style_profile(style: &str) -> Result<Option<StyleProfile>> {
             ],
         })),
         _ => Ok(None),
+    }
+}
+
+/// Use the LLM to produce a structured, readable style profile from sample text.
+/// Falls back to the statistical extractor when the LLM is unavailable.
+pub async fn analyze_style_with_llm(
+    db: &Database,
+    file_ids: &[String],
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+) -> Result<(StyleProfile, Vec<StyleExample>)> {
+    // 1. Collect sample text
+    let mut all_text = String::new();
+    let mut examples = Vec::new();
+
+    for file_id in file_ids {
+        let chunks = db.get_chunks(file_id)?;
+        for chunk in chunks.iter().take(8) {
+            let snippet = chunk.text.trim();
+            if snippet.is_empty() {
+                continue;
+            }
+            all_text.push_str(snippet);
+            all_text.push_str("\n\n");
+
+            if examples.len() < 8 {
+                examples.push(StyleExample {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    profile_id: String::new(),
+                    file_id: Some(file_id.clone()),
+                    note_id: None,
+                    text: snippet.chars().take(600).collect(),
+                    tags_json: "[\"sample\"]".to_string(),
+                });
+            }
+        }
+    }
+
+    if all_text.trim().len() < 100 {
+        return Ok((
+            StyleProfile {
+                style: "my_style".to_string(),
+                label: "Insufficient Data".to_string(),
+                description: "Not enough text in selected samples for LLM analysis.".to_string(),
+                constraints: vec![],
+            },
+            examples,
+        ));
+    }
+
+    // 2. Try LLM analysis
+    let truncated: String = all_text.chars().take(6000).collect();
+    let analysis_prompt = format!(
+        r#"Analyze the following writing samples and produce a structured style profile in JSON.
+
+Return ONLY valid JSON with this exact structure:
+```json
+{{
+  "tone": {{
+    "formality": "casual|semi-formal|formal|academic",
+    "emotion": "brief description (1 sentence)",
+    "confidence": "tentative|balanced|assertive|authoritative"
+  }},
+  "structure": {{
+    "opening_style": "brief description of how the writer typically opens",
+    "paragraph_style": "brief description of paragraph patterns",
+    "ending_style": "brief description of how the writer typically closes"
+  }},
+  "sentence_style": {{
+    "typical_length": "short|medium|long|varied",
+    "rhythm": "brief description of sentence rhythm patterns"
+  }},
+  "vocabulary": {{
+    "level": "simple|everyday|professional|academic|technical",
+    "signature_phrases": ["phrase1", "phrase2"],
+    "avoid_if_generating": ["thing to avoid 1"]
+  }},
+  "generation_rules": [
+    "concrete rule for generating text in this style",
+    "another rule"
+  ]
+}}
+```
+
+Writing samples to analyze:
+{}
+"#,
+        truncated
+    );
+
+    match call_llm_api(api_key, base_url, model, &analysis_prompt).await {
+        Ok(response) => {
+            if let Ok(profile) = parse_llm_style_response(&response, file_ids.len()) {
+                return Ok((profile, examples));
+            }
+        }
+        Err(e) => eprintln!("LLM style analysis failed, falling back to statistics: {}", e),
+    }
+
+    // 3. Fallback to statistical analysis
+    let profile = extract_style_profile_from_text(&all_text, file_ids.len());
+    Ok((profile, examples))
+}
+
+async fn call_llm_api(
+    api_key: &str,
+    base_url: &str,
+    model: &str,
+    prompt: &str,
+) -> Result<String> {
+    let body = serde_json::json!({
+        "model": model,
+        "messages": [
+            { "role": "system", "content": "You are a writing style analyzer. Always respond with valid JSON only." },
+            { "role": "user", "content": prompt }
+        ]
+    });
+
+    let client = reqwest::Client::new();
+    let response = client
+        .post(base_url)
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .json(&body)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let error_body = response.text().await.unwrap_or_default();
+        return Err(anyhow!("API error {}: {}", status, error_body));
+    }
+
+    let json: serde_json::Value = response.json().await?;
+    let content = json
+        .pointer("/choices/0/message/content")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| anyhow!("Unexpected API response structure"))?;
+
+    Ok(content.to_string())
+}
+
+fn parse_llm_style_response(response: &str, sample_count: usize) -> Result<StyleProfile> {
+    // Strip markdown code fences if present
+    let json_str = response
+        .trim()
+        .strip_prefix("```json")
+        .or_else(|| response.trim().strip_prefix("```"))
+        .map(|s| s.strip_suffix("```").unwrap_or(s))
+        .unwrap_or(response)
+        .trim();
+
+    let parsed: serde_json::Value = serde_json::from_str(json_str)?;
+
+    let tone = &parsed["tone"];
+    let structure = &parsed["structure"];
+    let sentence_style = &parsed["sentence_style"];
+    let vocabulary = &parsed["vocabulary"];
+    let generation_rules = &parsed["generation_rules"];
+
+    let mut constraints = Vec::new();
+
+    if let Some(v) = tone["formality"].as_str() {
+        constraints.push(StyleConstraint {
+            name: "Formality".to_string(),
+            value: v.to_string(),
+            explanation: format!("LLM-detected tone formality from {} sample files", sample_count),
+        });
+    }
+    if let Some(v) = tone["emotion"].as_str() {
+        constraints.push(StyleConstraint {
+            name: "Emotional Tone".to_string(),
+            value: v.to_string(),
+            explanation: "LLM-detected emotional quality".to_string(),
+        });
+    }
+    if let Some(v) = structure["opening_style"].as_str() {
+        constraints.push(StyleConstraint {
+            name: "Opening Style".to_string(),
+            value: v.to_string(),
+            explanation: "How the writer typically begins".to_string(),
+        });
+    }
+    if let Some(v) = structure["paragraph_style"].as_str() {
+        constraints.push(StyleConstraint {
+            name: "Paragraph Style".to_string(),
+            value: v.to_string(),
+            explanation: "Paragraph patterns detected by LLM".to_string(),
+        });
+    }
+    if let Some(v) = sentence_style["rhythm"].as_str() {
+        constraints.push(StyleConstraint {
+            name: "Sentence Rhythm".to_string(),
+            value: v.to_string(),
+            explanation: "LLM-detected sentence rhythm pattern".to_string(),
+        });
+    }
+    if let Some(v) = vocabulary["level"].as_str() {
+        constraints.push(StyleConstraint {
+            name: "Vocabulary Level".to_string(),
+            value: v.to_string(),
+            explanation: "Vocabulary sophistication detected by LLM".to_string(),
+        });
+    }
+
+    let rules: Vec<String> = if let Some(arr) = generation_rules.as_array() {
+        arr.iter()
+            .filter_map(|v| v.as_str().map(str::to_string))
+            .collect()
+    } else {
+        Vec::new()
+    };
+
+    for (i, rule) in rules.iter().enumerate() {
+        constraints.push(StyleConstraint {
+            name: format!("Generation Rule {}", i + 1),
+            value: rule.clone(),
+            explanation: "LLM-suggested rule for matching this style".to_string(),
+        });
+    }
+
+    let signature_phrases: Vec<String> = vocabulary["signature_phrases"]
+        .as_array()
+        .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
+        .unwrap_or_default();
+
+    Ok(StyleProfile {
+        style: "my_style".to_string(),
+        label: "LLM-Analyzed Style".to_string(),
+        description: format!(
+            "Style profile from {} sample file(s) using LLM analysis. Signature phrases: {}",
+            sample_count,
+            if signature_phrases.is_empty() {
+                "none detected".to_string()
+            } else {
+                signature_phrases.join(", ")
+            }
+        ),
+        constraints,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::extract_style_profile;
+    use crate::db::Database;
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "trace-style-{}-{}.db",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        path
+    }
+
+    #[test]
+    fn extract_style_profile_handles_empty_database() {
+        let path = temp_db_path("empty");
+        let db = Database::new(&path).expect("database should migrate");
+        let profile = extract_style_profile(&db).expect("empty style extraction should not fail");
+
+        assert_eq!(profile.style, "my_style");
+        assert!(profile.constraints.is_empty());
+
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 }

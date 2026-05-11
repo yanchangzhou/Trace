@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use rusqlite::{params, Connection};
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -30,88 +30,159 @@ impl Database {
 
     fn migrate(&self) -> Result<()> {
         let conn = self.conn.lock().unwrap();
-        conn.execute_batch(
-            "
-            CREATE TABLE IF NOT EXISTS books (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
 
-            CREATE TABLE IF NOT EXISTS files (
-                id TEXT PRIMARY KEY,
-                book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-                name TEXT NOT NULL,
-                path TEXT NOT NULL UNIQUE,
-                extension TEXT NOT NULL DEFAULT '',
-                size INTEGER NOT NULL DEFAULT 0,
-                hash TEXT,
-                status TEXT NOT NULL DEFAULT 'ready',
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
+        // Version-controlled migrations. PRAGMA user_version is a free integer SQLite provides.
+        let version: i32 = conn
+            .query_row("PRAGMA user_version", [], |r| r.get(0))
+            .unwrap_or(0);
 
-            CREATE TABLE IF NOT EXISTS documents (
-                file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
-                summary TEXT NOT NULL DEFAULT '',
-                word_count INTEGER NOT NULL DEFAULT 0,
-                page_count INTEGER,
-                slide_count INTEGER,
-                headings_json TEXT NOT NULL DEFAULT '[]',
-                parsed_at INTEGER NOT NULL
-            );
+        if version < 1 {
+            conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS books (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS document_chunks (
-                id TEXT PRIMARY KEY,
-                file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-                chunk_index INTEGER NOT NULL,
-                text TEXT NOT NULL,
-                token_count INTEGER NOT NULL DEFAULT 0,
-                locator_json TEXT NOT NULL DEFAULT '{}'
-            );
+                CREATE TABLE IF NOT EXISTS files (
+                    id TEXT PRIMARY KEY,
+                    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    name TEXT NOT NULL,
+                    path TEXT NOT NULL UNIQUE,
+                    extension TEXT NOT NULL DEFAULT '',
+                    size INTEGER NOT NULL DEFAULT 0,
+                    hash TEXT,
+                    status TEXT NOT NULL DEFAULT 'ready',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS notes (
-                id TEXT PRIMARY KEY,
-                book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
-                title TEXT NOT NULL DEFAULT 'Untitled Note',
-                content_json TEXT NOT NULL DEFAULT '{}',
-                plain_text TEXT NOT NULL DEFAULT '',
-                created_at INTEGER NOT NULL,
-                updated_at INTEGER NOT NULL
-            );
+                CREATE TABLE IF NOT EXISTS documents (
+                    file_id TEXT PRIMARY KEY REFERENCES files(id) ON DELETE CASCADE,
+                    summary TEXT NOT NULL DEFAULT '',
+                    word_count INTEGER NOT NULL DEFAULT 0,
+                    page_count INTEGER,
+                    slide_count INTEGER,
+                    headings_json TEXT NOT NULL DEFAULT '[]',
+                    parsed_at INTEGER NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS note_sources (
-                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-                file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
-                chunk_id TEXT,
-                quote_text TEXT NOT NULL DEFAULT '',
-                PRIMARY KEY (note_id, file_id, quote_text)
-            );
+                CREATE TABLE IF NOT EXISTS document_chunks (
+                    id TEXT PRIMARY KEY,
+                    file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+                    chunk_index INTEGER NOT NULL,
+                    text TEXT NOT NULL,
+                    token_count INTEGER NOT NULL DEFAULT 0,
+                    locator_json TEXT NOT NULL DEFAULT '{}'
+                );
 
-            CREATE TABLE IF NOT EXISTS note_versions (
-                id TEXT PRIMARY KEY,
-                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-                version_number INTEGER NOT NULL,
-                content_json TEXT NOT NULL,
-                plain_text TEXT NOT NULL,
-                created_at INTEGER NOT NULL
-            );
+                CREATE TABLE IF NOT EXISTS notes (
+                    id TEXT PRIMARY KEY,
+                    book_id TEXT NOT NULL REFERENCES books(id) ON DELETE CASCADE,
+                    title TEXT NOT NULL DEFAULT 'Untitled Note',
+                    content_json TEXT NOT NULL DEFAULT '{}',
+                    plain_text TEXT NOT NULL DEFAULT '',
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
 
-            CREATE TABLE IF NOT EXISTS note_sessions (
-                id TEXT PRIMARY KEY,
-                note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
-                started_at INTEGER NOT NULL,
-                ended_at INTEGER
-            );
+                CREATE TABLE IF NOT EXISTS note_sources (
+                    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    file_id TEXT NOT NULL REFERENCES files(id) ON DELETE CASCADE,
+                    chunk_id TEXT,
+                    quote_text TEXT NOT NULL DEFAULT '',
+                    PRIMARY KEY (note_id, file_id, quote_text)
+                );
 
-            CREATE INDEX IF NOT EXISTS idx_files_book ON files(book_id);
-            CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
-            CREATE INDEX IF NOT EXISTS idx_chunks_file ON document_chunks(file_id);
-            CREATE INDEX IF NOT EXISTS idx_notes_book ON notes(book_id);
-            CREATE INDEX IF NOT EXISTS idx_versions_note ON note_versions(note_id);
-            ",
-        )?;
+                CREATE TABLE IF NOT EXISTS note_versions (
+                    id TEXT PRIMARY KEY,
+                    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    version_number INTEGER NOT NULL,
+                    content_json TEXT NOT NULL,
+                    plain_text TEXT NOT NULL,
+                    created_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS note_sessions (
+                    id TEXT PRIMARY KEY,
+                    note_id TEXT NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+                    started_at INTEGER NOT NULL,
+                    ended_at INTEGER
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_files_book ON files(book_id);
+                CREATE INDEX IF NOT EXISTS idx_files_path ON files(path);
+                CREATE INDEX IF NOT EXISTS idx_chunks_file ON document_chunks(file_id);
+                CREATE INDEX IF NOT EXISTS idx_notes_book ON notes(book_id);
+                CREATE INDEX IF NOT EXISTS idx_versions_note ON note_versions(note_id);
+
+                PRAGMA user_version = 1;
+                ",
+            )?;
+        }
+
+        if version < 2 {
+            conn.execute_batch(
+                "
+                CREATE TABLE IF NOT EXISTS settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                );
+
+                PRAGMA user_version = 2;
+                ",
+            )?;
+        }
+
+        if version < 3 {
+            conn.execute_batch(
+                "
+                ALTER TABLE files ADD COLUMN role TEXT NOT NULL DEFAULT 'source';
+                ALTER TABLE files ADD COLUMN parse_status TEXT NOT NULL DEFAULT 'pending';
+                ALTER TABLE files ADD COLUMN parse_error TEXT;
+
+                CREATE TABLE IF NOT EXISTS style_profiles (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    source_scope TEXT NOT NULL,
+                    language TEXT,
+                    profile_json TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE TABLE IF NOT EXISTS style_examples (
+                    id TEXT PRIMARY KEY,
+                    profile_id TEXT NOT NULL REFERENCES style_profiles(id) ON DELETE CASCADE,
+                    file_id TEXT,
+                    note_id TEXT,
+                    text TEXT NOT NULL,
+                    tags_json TEXT NOT NULL DEFAULT '[]'
+                );
+
+                CREATE TABLE IF NOT EXISTS generation_runs (
+                    id TEXT PRIMARY KEY,
+                    task_type TEXT NOT NULL,
+                    style_profile_id TEXT,
+                    source_file_ids_json TEXT NOT NULL DEFAULT '[]',
+                    model TEXT NOT NULL,
+                    prompt_json TEXT NOT NULL,
+                    output_text TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL,
+                    created_at INTEGER NOT NULL,
+                    updated_at INTEGER NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_style_examples_profile ON style_examples(profile_id);
+                CREATE INDEX IF NOT EXISTS idx_generation_runs_created ON generation_runs(created_at);
+
+                PRAGMA user_version = 3;
+                ",
+            )?;
+        }
+
         Ok(())
     }
 
@@ -164,7 +235,7 @@ impl Database {
     pub fn list_files_by_book(&self, book_id: &str) -> Result<Vec<FileRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, book_id, name, path, extension, size, hash, status, created_at, updated_at
+            "SELECT id, book_id, name, path, extension, size, hash, status, role, parse_status, parse_error, created_at, updated_at
              FROM files WHERE book_id = ?1 ORDER BY created_at DESC",
         )?;
         let rows = stmt.query_map(params![book_id], |row| {
@@ -177,8 +248,11 @@ impl Database {
                 size: row.get(5)?,
                 hash: row.get(6)?,
                 status: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                role: row.get(8)?,
+                parse_status: row.get(9)?,
+                parse_error: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
@@ -187,11 +261,12 @@ impl Database {
     pub fn add_file(&self, file: &FileRecord) -> Result<()> {
         let conn = self.conn.lock().unwrap();
         conn.execute(
-            "INSERT OR REPLACE INTO files (id, book_id, name, path, extension, size, hash, status, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+            "INSERT OR REPLACE INTO files (id, book_id, name, path, extension, size, hash, status, role, parse_status, parse_error, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)",
             params![
                 file.id, file.book_id, file.name, file.path, file.extension,
-                file.size, file.hash, file.status, file.created_at, file.updated_at
+                file.size, file.hash, file.status, file.role, file.parse_status,
+                file.parse_error, file.created_at, file.updated_at
             ],
         )?;
         Ok(())
@@ -200,7 +275,7 @@ impl Database {
     pub fn get_file_by_path(&self, path: &str) -> Result<Option<FileRecord>> {
         let conn = self.conn.lock().unwrap();
         let mut stmt = conn.prepare(
-            "SELECT id, book_id, name, path, extension, size, hash, status, created_at, updated_at
+            "SELECT id, book_id, name, path, extension, size, hash, status, role, parse_status, parse_error, created_at, updated_at
              FROM files WHERE path = ?1",
         )?;
         let mut rows = stmt.query_map(params![path], |row| {
@@ -213,11 +288,38 @@ impl Database {
                 size: row.get(5)?,
                 hash: row.get(6)?,
                 status: row.get(7)?,
-                created_at: row.get(8)?,
-                updated_at: row.get(9)?,
+                role: row.get(8)?,
+                parse_status: row.get(9)?,
+                parse_error: row.get(10)?,
+                created_at: row.get(11)?,
+                updated_at: row.get(12)?,
             })
         })?;
         Ok(rows.next().transpose()?)
+    }
+
+    pub fn update_file_role(&self, file_id: &str, role: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET role = ?1, updated_at = ?2 WHERE id = ?3",
+            params![role, now_secs(), file_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn update_file_parse_status(
+        &self,
+        file_id: &str,
+        status: &str,
+        parse_status: &str,
+        parse_error: Option<&str>,
+    ) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE files SET status = ?1, parse_status = ?2, parse_error = ?3, updated_at = ?4 WHERE id = ?5",
+            params![status, parse_status, parse_error, now_secs(), file_id],
+        )?;
+        Ok(())
     }
 
     pub fn delete_file(&self, file_id: &str, file_path: &str) -> Result<()> {
@@ -265,16 +367,6 @@ impl Database {
     }
 
     // ── Document Chunks ──
-
-    pub fn insert_chunk(&self, chunk: &DocumentChunk) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO document_chunks (id, file_id, chunk_index, text, token_count, locator_json)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
-            params![chunk.id, chunk.file_id, chunk.chunk_index, chunk.text, chunk.token_count, chunk.locator_json],
-        )?;
-        Ok(())
-    }
 
     pub fn insert_chunks(&self, chunks: &[DocumentChunk]) -> Result<()> {
         let conn = self.conn.lock().unwrap();
@@ -338,15 +430,19 @@ impl Database {
             "UPDATE notes SET title = ?1, content_json = ?2, plain_text = ?3, updated_at = ?4 WHERE id = ?5",
             params![title, content_json, plain_text, now, note_id],
         )?;
-        Ok(Note {
-            id: note_id.to_string(), book_id: String::new(), title: title.to_string(),
-            content_json: content_json.to_string(), plain_text: plain_text.to_string(),
-            created_at: 0, updated_at: now,
-        })
+        // Return the full note to avoid callers getting stale/empty fields.
+        Self::get_note_with_conn(&conn, note_id)?
+            .ok_or_else(|| anyhow::anyhow!("Note {} not found after update", note_id))
     }
 
     pub fn get_note(&self, note_id: &str) -> Result<Option<Note>> {
         let conn = self.conn.lock().unwrap();
+        Self::get_note_with_conn(&conn, note_id)
+    }
+
+    /// Query a note using an already-acquired connection reference.
+    /// Use this inside methods that already hold the Mutex lock to avoid deadlocks.
+    fn get_note_with_conn(conn: &Connection, note_id: &str) -> Result<Option<Note>> {
         let mut stmt = conn.prepare(
             "SELECT id, book_id, title, content_json, plain_text, created_at, updated_at
              FROM notes WHERE id = ?1",
@@ -383,18 +479,6 @@ impl Database {
             })
         })?;
         Ok(rows.filter_map(|r| r.ok()).collect())
-    }
-
-    // ── Note Sources ──
-
-    pub fn add_note_source(&self, source: &NoteSource) -> Result<()> {
-        let conn = self.conn.lock().unwrap();
-        conn.execute(
-            "INSERT OR REPLACE INTO note_sources (note_id, file_id, chunk_id, quote_text)
-             VALUES (?1, ?2, ?3, ?4)",
-            params![source.note_id, source.file_id, source.chunk_id, source.quote_text],
-        )?;
-        Ok(())
     }
 
     // ── Note Versions ──
@@ -444,6 +528,8 @@ impl Database {
 
     pub fn restore_version(&self, note_id: &str, version_number: i64) -> Result<Option<Note>> {
         let conn = self.conn.lock().unwrap();
+
+        // Fetch the version content.
         let mut stmt = conn.prepare(
             "SELECT content_json, plain_text FROM note_versions
              WHERE note_id = ?1 AND version_number = ?2",
@@ -451,22 +537,19 @@ impl Database {
         let mut rows = stmt.query_map(params![note_id, version_number], |row| {
             Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
         })?;
-        if let Some(row) = rows.next() {
-            let (content_json, plain_text) = row?;
-            let note = self.get_note(note_id)?.context("Note not found")?;
-            // Update note with version content
-            conn.execute(
-                "UPDATE notes SET content_json = ?1, plain_text = ?2, updated_at = ?3 WHERE id = ?4",
-                params![content_json, plain_text, now_secs(), note_id],
-            )?;
-            Ok(Some(Note {
-                id: note.id, book_id: note.book_id, title: note.title,
-                content_json, plain_text,
-                created_at: note.created_at, updated_at: now_secs(),
-            }))
-        } else {
-            Ok(None)
-        }
+
+        let Some(row) = rows.next() else { return Ok(None) };
+        let (content_json, plain_text) = row?;
+
+        // Use the shared connection directly to avoid re-locking (deadlock prevention).
+        let now = now_secs();
+        conn.execute(
+            "UPDATE notes SET content_json = ?1, plain_text = ?2, updated_at = ?3 WHERE id = ?4",
+            params![content_json, plain_text, now, note_id],
+        )?;
+
+        // Re-read the complete note with the same connection.
+        Self::get_note_with_conn(&conn, note_id)
     }
 
     // ── Sessions ──
@@ -491,6 +574,24 @@ impl Database {
         Ok(())
     }
 
+    // ── Settings (key-value store) ──
+
+    pub fn save_setting(&self, key: &str, value: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
+    pub fn get_setting(&self, key: &str) -> Result<Option<String>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare("SELECT value FROM settings WHERE key = ?1")?;
+        let mut rows = stmt.query_map(params![key], |row| row.get::<_, String>(0))?;
+        Ok(rows.next().transpose()?)
+    }
+
     // ── Stats ──
 
     pub fn get_document_count(&self) -> Result<usize> {
@@ -501,5 +602,177 @@ impl Database {
     pub fn get_chunk_count(&self) -> Result<usize> {
         let conn = self.conn.lock().unwrap();
         Ok(conn.query_row("SELECT COUNT(*) FROM document_chunks", [], |r| r.get::<_, usize>(0))?)
+    }
+
+    // ── Style Profiles ──
+
+    pub fn create_style_profile(
+        &self,
+        name: &str,
+        source_scope: &str,
+        language: Option<&str>,
+        profile_json: &str,
+        examples: &[StyleExample],
+    ) -> Result<SavedStyleProfile> {
+        let conn = self.conn.lock().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_secs();
+        conn.execute(
+            "INSERT INTO style_profiles (id, name, source_scope, language, profile_json, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![&id, name, source_scope, language, profile_json, now, now],
+        )?;
+
+        let mut stmt = conn.prepare(
+            "INSERT INTO style_examples (id, profile_id, file_id, note_id, text, tags_json)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for example in examples {
+            stmt.execute(params![
+                &example.id,
+                &id,
+                &example.file_id,
+                &example.note_id,
+                &example.text,
+                &example.tags_json
+            ])?;
+        }
+
+        Ok(SavedStyleProfile {
+            id,
+            name: name.to_string(),
+            source_scope: source_scope.to_string(),
+            language: language.map(str::to_string),
+            profile_json: profile_json.to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    pub fn list_style_profiles(&self) -> Result<Vec<SavedStyleProfile>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, source_scope, language, profile_json, created_at, updated_at
+             FROM style_profiles ORDER BY updated_at DESC",
+        )?;
+        let rows = stmt.query_map([], |row| {
+            Ok(SavedStyleProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                source_scope: row.get(2)?,
+                language: row.get(3)?,
+                profile_json: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+        Ok(rows.filter_map(|r| r.ok()).collect())
+    }
+
+    pub fn get_style_profile_record(&self, profile_id: &str) -> Result<Option<SavedStyleProfile>> {
+        let conn = self.conn.lock().unwrap();
+        let mut stmt = conn.prepare(
+            "SELECT id, name, source_scope, language, profile_json, created_at, updated_at
+             FROM style_profiles WHERE id = ?1",
+        )?;
+        let mut rows = stmt.query_map(params![profile_id], |row| {
+            Ok(SavedStyleProfile {
+                id: row.get(0)?,
+                name: row.get(1)?,
+                source_scope: row.get(2)?,
+                language: row.get(3)?,
+                profile_json: row.get(4)?,
+                created_at: row.get(5)?,
+                updated_at: row.get(6)?,
+            })
+        })?;
+        Ok(rows.next().transpose()?)
+    }
+
+    pub fn update_style_profile(&self, profile_id: &str, name: &str, profile_json: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE style_profiles SET name = ?1, profile_json = ?2, updated_at = ?3 WHERE id = ?4",
+            params![name, profile_json, now_secs(), profile_id],
+        )?;
+        Ok(())
+    }
+
+    pub fn delete_style_profile(&self, profile_id: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute("DELETE FROM style_profiles WHERE id = ?1", params![profile_id])?;
+        Ok(())
+    }
+
+    // ── Generation Runs ──
+
+    pub fn create_generation_run(
+        &self,
+        task_type: &str,
+        style_profile_id: Option<&str>,
+        source_file_ids_json: &str,
+        model: &str,
+        prompt_json: &str,
+        status: &str,
+    ) -> Result<GenerationRun> {
+        let conn = self.conn.lock().unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = now_secs();
+        conn.execute(
+            "INSERT INTO generation_runs (id, task_type, style_profile_id, source_file_ids_json, model, prompt_json, status, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            params![id, task_type, style_profile_id, source_file_ids_json, model, prompt_json, status, now, now],
+        )?;
+        Ok(GenerationRun {
+            id,
+            task_type: task_type.to_string(),
+            style_profile_id: style_profile_id.map(str::to_string),
+            source_file_ids_json: source_file_ids_json.to_string(),
+            model: model.to_string(),
+            prompt_json: prompt_json.to_string(),
+            output_text: String::new(),
+            status: status.to_string(),
+            created_at: now,
+            updated_at: now,
+        })
+    }
+
+    pub fn finish_generation_run(&self, run_id: &str, output_text: &str, status: &str) -> Result<()> {
+        let conn = self.conn.lock().unwrap();
+        conn.execute(
+            "UPDATE generation_runs SET output_text = ?1, status = ?2, updated_at = ?3 WHERE id = ?4",
+            params![output_text, status, now_secs(), run_id],
+        )?;
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Database;
+
+    fn temp_db_path(name: &str) -> std::path::PathBuf {
+        let mut path = std::env::temp_dir();
+        path.push(format!(
+            "trace-{}-{}.db",
+            name,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        path
+    }
+
+    #[test]
+    fn migration_runs_on_new_database() {
+        let path = temp_db_path("migration");
+        let db = Database::new(&path).expect("database should migrate");
+
+        assert_eq!(db.get_document_count().unwrap(), 0);
+        assert_eq!(db.get_chunk_count().unwrap(), 0);
+
+        drop(db);
+        let _ = std::fs::remove_file(path);
     }
 }

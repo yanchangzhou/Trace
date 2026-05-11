@@ -20,8 +20,21 @@ pub struct FileRecord {
     pub size: u64,
     pub hash: Option<String>,
     pub status: String,
+    #[serde(default = "default_file_role")]
+    pub role: String,
+    #[serde(default = "default_parse_status")]
+    pub parse_status: String,
+    pub parse_error: Option<String>,
     pub created_at: i64,
     pub updated_at: i64,
+}
+
+fn default_file_role() -> String {
+    "source".to_string()
+}
+
+fn default_parse_status() -> String {
+    "pending".to_string()
 }
 
 // ── Stage 2: Documents & Chunks ──
@@ -61,19 +74,19 @@ pub struct Note {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NoteSource {
-    pub note_id: String,
-    pub file_id: String,
-    pub chunk_id: Option<String>,
-    pub quote_text: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AIRequest {
     pub action: String,
     pub context_file_ids: Vec<String>,
     pub style: Option<String>,
     pub prompt: Option<String>,
+    pub task_type: Option<String>,
+    pub style_profile_id: Option<String>,
+    pub output_mode: Option<String>,
+    pub audience: Option<String>,
+    pub goal: Option<String>,
+    pub length: Option<String>,
+    pub language: Option<String>,
+    pub constraints: Option<Vec<String>>,
 }
 
 // ── Stage 4: Version History & Sessions ──
@@ -111,4 +124,39 @@ pub struct StyleConstraint {
     pub name: String,
     pub value: String,
     pub explanation: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedStyleProfile {
+    pub id: String,
+    pub name: String,
+    pub source_scope: String,
+    pub language: Option<String>,
+    pub profile_json: String,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StyleExample {
+    pub id: String,
+    pub profile_id: String,
+    pub file_id: Option<String>,
+    pub note_id: Option<String>,
+    pub text: String,
+    pub tags_json: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerationRun {
+    pub id: String,
+    pub task_type: String,
+    pub style_profile_id: Option<String>,
+    pub source_file_ids_json: String,
+    pub model: String,
+    pub prompt_json: String,
+    pub output_text: String,
+    pub status: String,
+    pub created_at: i64,
+    pub updated_at: i64,
 }

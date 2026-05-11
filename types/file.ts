@@ -7,6 +7,9 @@ export interface SourceFile {
   addedAt: number;
   size?: number;
   status?: string;
+  role?: 'source' | 'style_sample' | 'both';
+  parseStatus?: 'pending' | 'parsing' | 'ready' | 'failed';
+  parseError?: string | null;
   file?: File;
 }
 

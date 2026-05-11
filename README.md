@@ -1,86 +1,60 @@
 # Trace
 
-Minimalist AI Collaboration Software built with Tauri v2 + Next.js 15
+Trace is a local-first Tauri + Next.js writing workspace for collecting source documents, extracting writing samples, building style profiles, and generating drafts with AI.
 
-## Tech Stack
+## Requirements
 
-- **Frontend**: Next.js 15 (App Router) + TypeScript + Tailwind CSS
-- **Desktop**: Tauri v2
-- **Internationalization**: next-intl
-- **Package Manager**: pnpm
+- Node.js 20+
+- npm
+- Rust stable
+- Tauri system prerequisites for your OS
 
-## Supported Languages
-
-- English (en) - Default
-- 中文 (zh)
-- Español (es)
-- Français (fr)
-- Deutsch (de)
-- 日本語 (ja)
-
-## Getting Started
-
-### Prerequisites
-
-- Node.js v20+
-- Rust v1.75+
-- pnpm
-
-### Installation
+## Install
 
 ```bash
-# Install dependencies
-pnpm install
-
-# Run development server (Next.js only)
-pnpm dev
-
-# Run Tauri development (Desktop app)
-pnpm tauri dev
-
-# Build for production
-pnpm tauri build
+npm install
 ```
 
-## Project Structure
+## Development
 
-```
-trace/
-├── app/                    # Next.js App Router
-│   ├── [locale]/          # Internationalized routes
-│   │   ├── layout.tsx     # Root layout with i18n
-│   │   └── page.tsx       # Home page
-│   └── globals.css        # Global styles
-├── i18n/                  # Internationalization config
-│   ├── request.ts         # i18n request handler
-│   └── routing.ts         # Routing configuration
-├── messages/              # Translation files (JSON)
-│   ├── en.json           # English
-│   ├── zh.json           # Chinese
-│   ├── es.json           # Spanish
-│   ├── fr.json           # French
-│   ├── de.json           # German
-│   └── ja.json           # Japanese
-├── src-tauri/            # Tauri backend
-│   ├── src/
-│   │   └── main.rs       # Rust entry point
-│   ├── Cargo.toml        # Rust dependencies
-│   └── tauri.conf.json   # Tauri configuration
-├── middleware.ts         # Next.js middleware for i18n
-├── next.config.ts        # Next.js configuration
-├── tailwind.config.ts    # Tailwind CSS configuration
-├── tsconfig.json         # TypeScript configuration
-└── package.json          # Node.js dependencies
+Use the Tauri desktop app as the acceptance environment for core features:
+
+```bash
+npm run tauri:dev
 ```
 
-## Development Guidelines
+This starts Next.js on `http://localhost:1420/en` and opens the desktop window.
 
-- All variable names and comments must be in English (Global Standard)
-- Follow TypeScript strict mode
-- Use Tailwind CSS for styling
-- Maintain responsive design for all screen sizes
-- Support dark mode by default
+Browser-only preview is available for UI checks:
 
-## License
+```bash
+npm run dev
+```
 
-MIT
+Browser mode does not exercise local filesystem, SQLite, parsing, indexing, or AI streaming.
+
+## Build
+
+```bash
+npm run build
+npm run tauri:build
+```
+
+## AI Setup
+
+Open the AI Assistant panel in the desktop app, click the key icon, and save an OpenAI API key. The current development build stores the key in the local SQLite `settings` table.
+
+## Supported Files
+
+- Preview/import: PDF, DOCX, PPTX, TXT, MD
+- Best current text extraction: TXT, MD, DOCX, PDF
+- PDF preview uses pdf.js; PDF text extraction uses a native extractor with a best-effort fallback.
+
+## Validation Commands
+
+```bash
+npx tsc --noEmit
+npm run build
+cd src-tauri && cargo test && cargo check
+```
+
