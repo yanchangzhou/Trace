@@ -120,6 +120,34 @@ body.no-transitions * {
 
 
 :root {
+  /* Light mode RGB tokens */
+  --tw-bg-light-rgb: 247, 245, 242;
+  --tw-card-light-rgb: 255, 255, 255;
+  --tw-surface-light-rgb: 254, 254, 254;
+  --tw-border-light-rgb: 232, 230, 227;
+  --tw-text-primary-light-rgb: 26, 26, 26;
+  --tw-text-secondary-light-rgb: 107, 107, 107;
+  --tw-text-tertiary-light-rgb: 120, 120, 120;
+
+  /* Dark mode RGB tokens (defaults, overridden by .dark.incognito) */
+  --tw-bg-dark-rgb: 18, 18, 18;
+  --tw-card-dark-rgb: 30, 30, 30;
+  --tw-surface-dark-rgb: 37, 37, 37;
+  --tw-border-dark-rgb: 42, 42, 42;
+  --tw-text-primary-dark-rgb: 245, 245, 245;
+  --tw-text-secondary-dark-rgb: 160, 160, 160;
+  --tw-text-tertiary-dark-rgb: 140, 140, 140;
+
+  /* Accent RGB tokens */
+  --tw-accent-warm-rgb: 212, 165, 116;
+  --tw-accent-cool-rgb: 123, 158, 168;
+  --tw-accent-primary-rgb: 45, 95, 126;
+
+  /* Icon colors */
+  --tw-icon-inactive-rgb: 160, 158, 155;
+  --tw-icon-active-rgb: 212, 165, 116;
+
+  /* Body colors */
   --background: #F7F5F2;
   --foreground: #1A1A1A;
 }
@@ -127,6 +155,27 @@ body.no-transitions * {
 .dark {
   --background: #121212;
   --foreground: #F5F5F5;
+}
+
+.dark.incognito {
+  /* Desaturated gray mode — darker backgrounds for better text contrast */
+  --tw-bg-dark-rgb: 38, 38, 38;
+  --tw-card-dark-rgb: 50, 50, 50;
+  --tw-surface-dark-rgb: 55, 55, 55;
+  --tw-border-dark-rgb: 65, 65, 65;
+  --tw-text-primary-dark-rgb: 240, 240, 240;
+  --tw-text-secondary-dark-rgb: 195, 195, 195;
+  --tw-text-tertiary-dark-rgb: 170, 170, 170;
+
+  --tw-accent-warm-rgb: 165, 165, 165;
+  --tw-accent-cool-rgb: 150, 150, 150;
+  --tw-accent-primary-rgb: 135, 135, 135;
+
+  --tw-icon-inactive-rgb: 140, 140, 140;
+  --tw-icon-active-rgb: 175, 175, 175;
+
+  --background: #262626;
+  --foreground: #F0F0F0;
 }
 
 body {

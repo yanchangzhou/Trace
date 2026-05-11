@@ -16,7 +16,7 @@ interface FilePreviewContextType {
 const FilePreviewContext = createContext<FilePreviewContextType | undefined>(undefined);
 
 const MIN_WIDTH = 400;
-const DEFAULT_WIDTH = 600;
+const DEFAULT_WIDTH = 720;
 const EDITOR_RESERVE_PX = 300;
 
 export function FilePreviewProvider({ children }: { children: ReactNode }) {

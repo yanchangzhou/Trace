@@ -10,6 +10,7 @@ import { useQuickLook } from '@/hooks/useQuickLook';
 import { SidebarProvider } from '@/contexts/SidebarContext';
 import { BookProvider } from '@/contexts/BookContext';
 import { FilePreviewProvider } from '@/contexts/FilePreviewContext';
+import { ThemeProvider } from '@/contexts/ThemeContext';
 import { SpotlightProvider, useSpotlightContext } from '@/contexts/SpotlightContext';
 
 function AppContent() {
@@ -38,14 +39,16 @@ function AppContent() {
 
 export default function HomePage() {
   return (
-    <SidebarProvider>
-      <BookProvider>
-        <FilePreviewProvider>
-          <SpotlightProvider>
-            <AppContent />
-          </SpotlightProvider>
-        </FilePreviewProvider>
-      </BookProvider>
-    </SidebarProvider>
+    <ThemeProvider>
+      <SidebarProvider>
+        <BookProvider>
+          <FilePreviewProvider>
+            <SpotlightProvider>
+              <AppContent />
+            </SpotlightProvider>
+          </FilePreviewProvider>
+        </BookProvider>
+      </SidebarProvider>
+    </ThemeProvider>
   );
 }

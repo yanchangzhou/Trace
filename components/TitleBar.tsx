@@ -1,12 +1,16 @@
 'use client';
 
-import { X, Minus, Square, Search } from 'lucide-react';
-import { useCallback, useEffect, useState } from 'react';
+import { X, Minus, Square, Search, Sun, Moon, EyeOff, Check } from 'lucide-react';
+import { useCallback, useEffect, useState, useRef } from 'react';
 import { useSpotlightContext } from '@/contexts/SpotlightContext';
+import { useTheme, type ThemeMode } from '@/contexts/ThemeContext';
 
 export default function TitleBar() {
   const [isTauri, setIsTauri] = useState(false);
   const spotlight = useSpotlightContext();
+  const { theme, setTheme } = useTheme();
+  const [themeMenuOpen, setThemeMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     try {
@@ -17,6 +21,26 @@ export default function TitleBar() {
       // browser mode
     }
   }, []);
+
+  // Close theme menu on outside click
+  useEffect(() => {
+    if (!themeMenuOpen) return;
+    const handler = (e: MouseEvent) => {
+      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
+        setThemeMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [themeMenuOpen]);
+
+  const themeIcon = theme === 'light' ? <Sun className="w-4 h-4" /> : theme === 'dark' ? <Moon className="w-4 h-4" /> : <EyeOff className="w-4 h-4" />;
+
+  const themeOptions: { mode: ThemeMode; icon: React.ReactNode; label: string }[] = [
+    { mode: 'light', icon: <Sun className="w-4 h-4" />, label: 'Light' },
+    { mode: 'dark', icon: <Moon className="w-4 h-4" />, label: 'Dark' },
+    { mode: 'incognito', icon: <EyeOff className="w-4 h-4" />, label: 'Incognito' },
+  ];
 
   const handleMinimize = useCallback(async () => {
     try {
@@ -74,6 +98,41 @@ export default function TitleBar() {
             </kbd>
           )}
         </button>
+
+        {/* Theme selector dropdown */}
+        <div className="relative" ref={menuRef}>
+          <button
+            onClick={() => setThemeMenuOpen(!themeMenuOpen)}
+            className="w-8 h-8 rounded-lg hover:bg-surface-light dark:hover:bg-surface-dark transition-colors flex items-center justify-center"
+            aria-label="Select theme"
+            title={`Theme: ${theme}`}
+          >
+            {themeIcon}
+          </button>
+
+          {themeMenuOpen && (
+            <div className="absolute right-0 top-full mt-1 w-36 bg-card-light dark:bg-card-dark rounded-lg shadow-ambient-lg dark:shadow-ambient-lg-dark border border-border-light dark:border-border-dark overflow-hidden z-50">
+              {themeOptions.map((option) => (
+                <button
+                  key={option.mode}
+                  onClick={() => {
+                    setTheme(option.mode);
+                    setThemeMenuOpen(false);
+                  }}
+                  className={`w-full px-3 py-2 text-left text-sm flex items-center gap-2 hover:bg-surface-light dark:hover:bg-surface-dark transition-colors ${
+                    theme === option.mode
+                      ? 'text-accent-warm'
+                      : 'text-text-primary-light dark:text-text-primary-dark'
+                  }`}
+                >
+                  {option.icon}
+                  <span className="flex-1">{option.label}</span>
+                  {theme === option.mode && <Check className="w-3.5 h-3.5" />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {isTauri && (
           <>

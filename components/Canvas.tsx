@@ -403,7 +403,9 @@ export default function Canvas() {
 
   const buttonClass = (active = false) =>
     `w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
-      active ? 'bg-accent-warm/20 text-text-primary-light' : 'hover:bg-black/5 text-text-secondary-light'
+      active
+        ? 'bg-accent-warm/20 text-text-primary-light dark:text-text-primary-dark'
+        : 'hover:bg-black/5 dark:hover:bg-white/5 text-text-secondary-light dark:text-text-secondary-dark'
     }`;
 
   const keepSelectionOnMouseDown = (e: React.MouseEvent) => {
@@ -474,7 +476,7 @@ export default function Canvas() {
                   animate={{ opacity: 1, scale: 1, y: 0 }}
                   exit={{ opacity: 0, scale: 0.96, y: 6 }}
                   transition={{ duration: 0.14 }}
-                  className="relative z-[200] flex items-center gap-1 p-1.5 rounded-lg border border-border-light/60 bg-[#FBFBFB] shadow-[0_10px_28px_rgba(15,23,42,0.16)]"
+                  className="relative z-[200] flex items-center gap-1 p-1.5 rounded-lg border border-border-light/60 dark:border-border-dark/60 bg-card-light dark:bg-card-dark shadow-[0_10px_28px_rgba(15,23,42,0.16)] dark:shadow-[0_10px_28px_rgba(0,0,0,0.4)]"
                 >
                   <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleBold().run()} className={buttonClass(editor.isActive('bold'))}>
                     <Bold className="w-4 h-4" />
@@ -499,7 +501,7 @@ export default function Canvas() {
                       setShowColorPanel(false);
                       setShowHighlightPanel(false);
                     }}
-                    className="h-8 px-2 rounded-md flex items-center gap-1 hover:bg-black/5 text-xs font-medium min-w-[112px] justify-between"
+                    className="h-8 px-2 rounded-md flex items-center gap-1 hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark text-xs font-medium min-w-[112px] justify-between"
                   >
                     <span className="truncate">{turnIntoLabel}</span>
                     <ChevronDown className="w-3 h-3" />
@@ -530,21 +532,21 @@ export default function Canvas() {
                   </button>
 
                   {showHeadingMenu && (
-                    <div className="absolute left-0 top-full mt-2 p-1.5 bg-white rounded-lg border border-border-light shadow-md flex flex-col min-w-[210px]">
-                      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-tertiary-light">Turn into</div>
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('paragraph')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="w-4 text-center">T</span>Text</span>{editor?.isActive('paragraph') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('h1')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Heading1 className="w-3.5 h-3.5" />Heading 1</span>{editor?.isActive('heading', { level: 1 }) && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('h2')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Heading2 className="w-3.5 h-3.5" />Heading 2</span>{editor?.isActive('heading', { level: 2 }) && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('h3')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Heading3 className="w-3.5 h-3.5" />Heading 3</span>{editor?.isActive('heading', { level: 3 }) && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
-                      <div className="my-1 border-t border-border-light" />
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('bullet')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><List className="w-3.5 h-3.5" />Bulleted list</span>{editor?.isActive('bulletList') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('ordered')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><ListOrdered className="w-3.5 h-3.5" />Numbered list</span>{editor?.isActive('orderedList') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
-                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('codeBlock')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Code2 className="w-3.5 h-3.5" />Code block</span>{editor?.isActive('codeBlock') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                    <div className="absolute left-0 top-full mt-2 p-1.5 bg-card-light dark:bg-card-dark rounded-lg border border-border-light dark:border-border-dark shadow-md flex flex-col min-w-[210px]">
+                      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-tertiary-light dark:text-text-tertiary-dark">Turn into</div>
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('paragraph')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><span className="w-4 text-center">T</span>Text</span>{editor?.isActive('paragraph') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('h1')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Heading1 className="w-3.5 h-3.5" />Heading 1</span>{editor?.isActive('heading', { level: 1 }) && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('h2')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Heading2 className="w-3.5 h-3.5" />Heading 2</span>{editor?.isActive('heading', { level: 2 }) && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('h3')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Heading3 className="w-3.5 h-3.5" />Heading 3</span>{editor?.isActive('heading', { level: 3 }) && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                      <div className="my-1 border-t border-border-light dark:border-border-dark" />
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('bullet')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><List className="w-3.5 h-3.5" />Bulleted list</span>{editor?.isActive('bulletList') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('ordered')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><ListOrdered className="w-3.5 h-3.5" />Numbered list</span>{editor?.isActive('orderedList') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
+                      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => setBlockType('codeBlock')} className="px-2 py-1.5 text-left text-xs rounded hover:bg-black/5 dark:hover:bg-white/5 text-text-primary-light dark:text-text-primary-dark flex items-center justify-between gap-2"><span className="flex items-center gap-2"><Code2 className="w-3.5 h-3.5" />Code block</span>{editor?.isActive('codeBlock') && <Check className="w-3.5 h-3.5 text-accent-warm" />}</button>
                     </div>
                   )}
 
                   {showColorPanel && (
-                    <div className="absolute left-0 top-full mt-2 p-2 bg-white rounded-lg border border-border-light shadow-md flex items-center gap-1">
+                    <div className="absolute left-0 top-full mt-2 p-2 bg-card-light dark:bg-card-dark rounded-lg border border-border-light dark:border-border-dark shadow-md flex items-center gap-1">
                       {textColors.map((color) => (
                         <button
                           key={color}
@@ -565,7 +567,7 @@ export default function Canvas() {
                           editor.chain().focus().unsetColor().run();
                           setShowColorPanel(false);
                         }}
-                        className="ml-1 px-1.5 py-0.5 text-[10px] rounded border border-border-light hover:bg-black/5"
+                        className="ml-1 px-1.5 py-0.5 text-[10px] rounded border border-border-light dark:border-border-dark hover:bg-black/5 dark:hover:bg-white/5 text-text-secondary-light dark:text-text-secondary-dark"
                       >
                         Clear
                       </button>
@@ -573,7 +575,7 @@ export default function Canvas() {
                   )}
 
                   {showHighlightPanel && (
-                    <div className="absolute left-10 top-full mt-2 p-2 bg-white rounded-lg border border-border-light shadow-md flex items-center gap-1">
+                    <div className="absolute left-10 top-full mt-2 p-2 bg-card-light dark:bg-card-dark rounded-lg border border-border-light dark:border-border-dark shadow-md flex items-center gap-1">
                       {highlightColors.map((color) => (
                         <button
                           key={color}
@@ -594,7 +596,7 @@ export default function Canvas() {
                           editor.chain().focus().unsetHighlight().run();
                           setShowHighlightPanel(false);
                         }}
-                        className="ml-1 px-1.5 py-0.5 text-[10px] rounded border border-border-light hover:bg-black/5"
+                        className="ml-1 px-1.5 py-0.5 text-[10px] rounded border border-border-light dark:border-border-dark hover:bg-black/5 dark:hover:bg-white/5 text-text-secondary-light dark:text-text-secondary-dark"
                       >
                         Clear
                       </button>
