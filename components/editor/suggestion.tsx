@@ -49,7 +49,7 @@ export const SlashCommand = Extension.create({
   addProseMirrorPlugins() {
     return [
       Suggestion<CommandItem, CommandItem>({
-        editor: undefined as any,
+        editor: this.editor,
         char: '/',
         allowedPrefixes: [' '],
         startOfLine: true,

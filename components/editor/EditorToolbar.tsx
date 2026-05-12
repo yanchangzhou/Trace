@@ -30,11 +30,38 @@ interface EditorToolbarProps {
 
 export default function EditorToolbar({ editor }: EditorToolbarProps) {
   const [showColorPanel, setShowColorPanel] = useState(false);
-
-  if (!editor) return null;
   const [showHighlightPanel, setShowHighlightPanel] = useState(false);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
   const bubbleRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!editor) return;
+    const close = () => {
+      setShowColorPanel(false);
+      setShowHighlightPanel(false);
+      setShowHeadingMenu(false);
+    };
+    editor.on('selectionUpdate', close);
+    editor.on('blur', close);
+    return () => {
+      editor.off('selectionUpdate', close);
+      editor.off('blur', close);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!bubbleRef.current) return;
+      if (bubbleRef.current.contains(e.target as Node)) return;
+      setShowColorPanel(false);
+      setShowHighlightPanel(false);
+      setShowHeadingMenu(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  if (!editor) return null;
 
   const buttonClass = (active = false) =>
     `w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
@@ -83,33 +110,6 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
             : editor.isActive('heading', { level: 3 })
               ? 'H3'
               : 'Text';
-
-  useEffect(() => {
-    if (!editor) return;
-    const close = () => {
-      setShowColorPanel(false);
-      setShowHighlightPanel(false);
-      setShowHeadingMenu(false);
-    };
-    editor.on('selectionUpdate', close);
-    editor.on('blur', close);
-    return () => {
-      editor.off('selectionUpdate', close);
-      editor.off('blur', close);
-    };
-  }, [editor]);
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!bubbleRef.current) return;
-      if (bubbleRef.current.contains(e.target as Node)) return;
-      setShowColorPanel(false);
-      setShowHighlightPanel(false);
-      setShowHeadingMenu(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, []);
 
   return (
     <motion.div

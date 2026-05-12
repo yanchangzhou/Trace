@@ -55,27 +55,29 @@ export default function EditorShell() {
   // after the note exists in the DB.
   const savedNoteIdRef = useRef<string | null>(null);
 
+  const extensions = useMemo(() => [
+    StarterKit,
+    Underline,
+    TextStyle,
+    Color,
+    Highlight.configure({ multicolor: true }),
+    Link.configure({
+      openOnClick: false,
+      autolink: true,
+      defaultProtocol: 'https',
+    }),
+    Placeholder.configure({
+      placeholder: 'Start writing your thoughts...',
+    }),
+    BlockDragExtension.configure({
+      dragHandleSelector: '.block-drag-handle',
+    }),
+    SlashCommand,
+  ], []);
+
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit,
-      Underline,
-      TextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
-      Link.configure({
-        openOnClick: false,
-        autolink: true,
-        defaultProtocol: 'https',
-      }),
-      Placeholder.configure({
-        placeholder: 'Start writing your thoughts...',
-      }),
-      BlockDragExtension.configure({
-        dragHandleSelector: '.block-drag-handle',
-      }),
-      SlashCommand,
-    ],
+    extensions,
     content: '<p></p>',
     editorProps: {
       attributes: {
@@ -253,23 +255,6 @@ export default function EditorShell() {
             />
           </div>
 
-          {/* Bubble Menu Toolbar */}
-          {editor && (
-            <BubbleMenu
-              editor={editor}
-              options={{ placement: 'top' }}
-              shouldShow={({ editor: e, state }) => {
-                if (!e?.isEditable || !e.isFocused || !state?.selection) return false;
-                const { from, to, empty } = state.selection;
-                return !empty && e.state.doc.textBetween(from, to, ' ').trim().length > 0;
-              }}
-              updateDelay={80}
-              appendTo={() => document.body}
-            >
-              <EditorToolbar editor={editor} />
-            </BubbleMenu>
-          )}
-
           {/* Editor Content */}
           <EditorContent
             editor={editor}
@@ -294,6 +279,23 @@ export default function EditorShell() {
               [&_.ProseMirror_hr]:my-8 [&_.ProseMirror_hr]:border-border-light [&_.ProseMirror_hr]:dark:border-border-dark
             "
           />
+
+          {/* Bubble Menu Toolbar */}
+          {editor && (
+            <BubbleMenu
+              editor={editor}
+              options={{ placement: 'top' }}
+              shouldShow={({ editor: e, state }) => {
+                if (!e?.isEditable || !e.isFocused || !state?.selection) return false;
+                const { from, to, empty } = state.selection;
+                return !empty && e.state.doc.textBetween(from, to, ' ').trim().length > 0;
+              }}
+              updateDelay={80}
+              appendTo={() => document.body}
+            >
+              <EditorToolbar editor={editor} />
+            </BubbleMenu>
+          )}
         </motion.div>
 
         {/* Action Bar */}

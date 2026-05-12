@@ -17,14 +17,9 @@ import {
   Microscope,
   Zap,
   User,
-  Key,
-  Eye,
-  EyeOff,
-  AlertCircle,
-  MessageCircle,
-  Mail,
-  GraduationCap,
-  Settings,
+  Save,
+  Trash2,
+  Bookmark,
 } from 'lucide-react';
 import { useState, useRef, useEffect, useCallback } from 'react';
 import { useEditorContext } from '@/contexts/EditorContext';
@@ -32,8 +27,8 @@ import { useBook } from '@/contexts/BookContext';
 import type { AIMessage, WritingStyle, StyleProfile, AIRequest, SavedStyleProfile } from '@/types';
 import StreamingComposer from './StreamingComposer';
 import {
-  streamGenerate, saveApiKey, getApiKey, getStyleProfile, isTauriEnvironment,
-  listSavedStyleProfiles, saveModelSettings, getModelSettings,
+  streamGenerate, getStyleProfile, isTauriEnvironment,
+  listSavedStyleProfiles,
 } from '@/lib/tauri';
 
 const springConfig = {
@@ -62,12 +57,32 @@ const ACTIONS = [
   { key: 'free', label: 'Chat', description: 'Free-form AI chat', icon: MessageSquare },
 ] as const;
 
-const TASK_TYPES = [
-  { key: '', label: 'Basic', icon: MessageCircle, description: 'Standard AI actions' },
-  { key: 'wechat_article', label: '公众号', icon: FileText, description: 'WeChat article' },
-  { key: 'long_email', label: '长邮件', icon: Mail, description: 'Long-form email' },
-  { key: 'course_paper', label: '课程论文', icon: GraduationCap, description: 'Course paper' },
-] as const;
+interface GoalTemplate {
+  id: string;
+  name: string;
+  goal: string;
+  audience: string;
+  language: string;
+  length: string;
+  outputMode: string;
+}
+
+const TEMPLATES_STORAGE_KEY = 'trace_goal_templates';
+
+function loadTemplates(): GoalTemplate[] {
+  if (typeof window === 'undefined') return [];
+  try {
+    const raw = localStorage.getItem(TEMPLATES_STORAGE_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveTemplatesToStorage(templates: GoalTemplate[]) {
+  if (typeof window === 'undefined') return;
+  localStorage.setItem(TEMPLATES_STORAGE_KEY, JSON.stringify(templates));
+}
 
 export default function AIPanel() {
   const { isAIPanelOpen, setAIPanelOpen, insertGeneratedText, replaceSelection } = useEditorContext();
@@ -78,7 +93,6 @@ export default function AIPanel() {
   const [isStreaming, setIsStreaming] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState('');
   const [activeAction, setActiveAction] = useState<string>('free');
-  const [activeTaskType, setActiveTaskType] = useState<string>('');
   const [selectedStyle, setSelectedStyle] = useState<WritingStyle>('default');
   const [styleProfile, setStyleProfile] = useState<StyleProfile | null>(null);
   const [savedStyleProfiles, setSavedStyleProfiles] = useState<SavedStyleProfile[]>([]);
@@ -86,107 +100,105 @@ export default function AIPanel() {
   const [showStyleMenu, setShowStyleMenu] = useState(false);
   const [showStyleConstraints, setShowStyleConstraints] = useState(false);
 
-  // Writing task fields
-  const [audience, setAudience] = useState('');
+  // Writing fields
   const [goal, setGoal] = useState('');
+  const [audience, setAudience] = useState('');
   const [length, setLength] = useState('');
   const [language, setLanguage] = useState('');
   const [outputMode, setOutputMode] = useState('draft');
+  const [showWritingFields, setShowWritingFields] = useState(false);
 
-  // API key management
-  const [apiKey, setApiKey] = useState('');
-  const [savedApiKey, setSavedApiKey] = useState<string | null>(null);
-  const [showApiKeyInput, setShowApiKeyInput] = useState(false);
-  const [showApiKeyText, setShowApiKeyText] = useState(false);
-  const [apiKeySaving, setApiKeySaving] = useState(false);
-  const [isTauri, setIsTauri] = useState(false);
-
-  // Model settings
-  const [showModelSettings, setShowModelSettings] = useState(false);
-  const [modelProvider, setModelProvider] = useState('openai');
-  const [modelName, setModelName] = useState('gpt-4o-mini');
-  const [modelBaseUrl, setModelBaseUrl] = useState('https://api.openai.com/v1/chat/completions');
-  const [modelSaving, setModelSaving] = useState(false);
+  // Goal templates
+  const [templates, setTemplates] = useState<GoalTemplate[]>([]);
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateSaveName, setTemplateSaveName] = useState('');
+  const [showTemplateSaveInput, setShowTemplateSaveInput] = useState(false);
 
   const cancelStreamRef = useRef<(() => void) | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const templateMenuRef = useRef<HTMLDivElement>(null);
 
+  // Load templates on mount
   useEffect(() => {
-    setIsTauri(isTauriEnvironment());
+    setTemplates(loadTemplates());
   }, []);
+
+  // Load saved style profiles on open
+  useEffect(() => {
+    if (!isAIPanelOpen) return;
+    if (isTauriEnvironment()) {
+      listSavedStyleProfiles().then(setSavedStyleProfiles).catch(() => setSavedStyleProfiles([]));
+    }
+  }, [isAIPanelOpen]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, streamBuffer]);
 
-  // Load saved API key and model settings on open
+  // Close template menu on outside click
   useEffect(() => {
-    if (!isAIPanelOpen || !isTauri) return;
-    getApiKey().then((k) => {
-      if (k) setSavedApiKey(k);
-    });
-    listSavedStyleProfiles().then(setSavedStyleProfiles).catch(() => setSavedStyleProfiles([]));
-    getModelSettings().then((settings) => {
-      if (settings) {
-        if (settings.provider) setModelProvider(settings.provider);
-        if (settings.model_name) setModelName(settings.model_name);
-        if (settings.base_url) setModelBaseUrl(settings.base_url);
-      }
-    }).catch(() => {});
-  }, [isAIPanelOpen, isTauri]);
+    const onDown = (e: MouseEvent) => {
+      if (!templateMenuRef.current) return;
+      if (templateMenuRef.current.contains(e.target as Node)) return;
+      setShowTemplates(false);
+      setShowTemplateSaveInput(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
 
   const currentStyle = STYLE_OPTIONS.find((s) => s.key === selectedStyle) ?? STYLE_OPTIONS[0];
   const StyleIcon = currentStyle.icon;
 
-  const handleSaveApiKey = useCallback(async () => {
-    if (!apiKey.trim()) return;
-    setApiKeySaving(true);
-    try {
-      await saveApiKey(apiKey.trim());
-      setSavedApiKey(apiKey.trim());
-      setApiKey('');
-      setShowApiKeyInput(false);
-    } catch (error) {
-      console.error('Failed to save API key:', error);
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: `msg-${Date.now()}`,
-          role: 'assistant',
-          content: `Error: ${error instanceof Error ? error.message : 'Failed to save API key'}`,
-          timestamp: Date.now(),
-        },
-      ]);
-    } finally {
-      setApiKeySaving(false);
-    }
-  }, [apiKey]);
+  // ── Template management ──
 
-  const handleSaveModelSettings = useCallback(async () => {
-    if (!isTauri) return;
-    setModelSaving(true);
-    try {
-      await saveModelSettings(modelProvider, modelName, modelBaseUrl);
-      setShowModelSettings(false);
-    } catch (error) {
-      console.error('Failed to save model settings:', error);
-    } finally {
-      setModelSaving(false);
-    }
-  }, [isTauri, modelProvider, modelName, modelBaseUrl]);
+  const handleSaveTemplate = useCallback(() => {
+    const name = templateSaveName.trim();
+    if (!name || !goal.trim()) return;
+    const newTemplate: GoalTemplate = {
+      id: `tpl-${Date.now()}`,
+      name,
+      goal: goal.trim(),
+      audience: audience.trim(),
+      language,
+      length: length.trim(),
+      outputMode,
+    };
+    const updated = [...templates, newTemplate];
+    setTemplates(updated);
+    saveTemplatesToStorage(updated);
+    setTemplateSaveName('');
+    setShowTemplateSaveInput(false);
+  }, [templateSaveName, goal, audience, language, length, outputMode, templates]);
+
+  const handleLoadTemplate = useCallback((template: GoalTemplate) => {
+    setGoal(template.goal);
+    setAudience(template.audience);
+    setLanguage(template.language);
+    setLength(template.length);
+    setOutputMode(template.outputMode);
+    setShowTemplates(false);
+  }, []);
+
+  const handleDeleteTemplate = useCallback((id: string) => {
+    const updated = templates.filter((t) => t.id !== id);
+    setTemplates(updated);
+    saveTemplatesToStorage(updated);
+  }, [templates]);
+
+  // ── Send ──
 
   const handleSend = useCallback(async () => {
     const text = inputText.trim();
     if (!text || isStreaming) return;
 
-    // Browser fallback: show a message explaining Tauri is required
-    if (!isTauri) {
+    if (!isTauriEnvironment()) {
       const demoMsg: AIMessage = {
         id: `msg-${Date.now()}`,
         role: 'assistant',
         content:
-          'AI generation requires the desktop app. Run `npm run tauri dev` and set your OpenAI API key in the AI panel settings.',
+          'AI generation requires the desktop app. Run `npm run tauri dev` to launch.',
         timestamp: Date.now(),
       };
       setMessages((prev) => [
@@ -195,11 +207,6 @@ export default function AIPanel() {
         demoMsg,
       ]);
       setInputText('');
-      return;
-    }
-
-    if (!savedApiKey) {
-      setShowApiKeyInput(true);
       return;
     }
 
@@ -224,10 +231,9 @@ export default function AIPanel() {
       style: selectedStyle,
       style_profile_id: selectedSavedStyleProfileId || undefined,
       prompt: text,
-      task_type: activeTaskType || undefined,
-      audience: audience || undefined,
-      goal: goal || undefined,
-      length: length || undefined,
+      goal: goal.trim() || undefined,
+      audience: audience.trim() || undefined,
+      length: length.trim() || undefined,
       language: language || undefined,
       output_mode: outputMode || undefined,
     };
@@ -267,7 +273,7 @@ export default function AIPanel() {
     );
 
     cancelStreamRef.current = cancel;
-  }, [inputText, isStreaming, isTauri, savedApiKey, currentFiles, activeAction, selectedStyle, selectedSavedStyleProfileId]);
+  }, [inputText, isStreaming, currentFiles, activeAction, selectedStyle, selectedSavedStyleProfileId, goal, audience, length, language, outputMode]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
@@ -299,7 +305,7 @@ export default function AIPanel() {
   const handleSelectStyle = useCallback(async (key: WritingStyle) => {
     setSelectedStyle(key);
     setShowStyleMenu(false);
-    if (key === 'my_style' && isTauri) {
+    if (key === 'my_style' && isTauriEnvironment()) {
       const profile = await getStyleProfile('my_style');
       if (profile) {
         setStyleProfile(profile);
@@ -308,7 +314,9 @@ export default function AIPanel() {
     } else {
       setShowStyleConstraints(false);
     }
-  }, [isTauri]);
+  }, []);
+
+  const hasTemplates = templates.length > 0;
 
   return (
     <AnimatePresence>
@@ -328,165 +336,13 @@ export default function AIPanel() {
                 AI Assistant
               </h2>
             </div>
-            <div className="flex items-center gap-1">
-              <button
-                onClick={() => setShowModelSettings((v) => !v)}
-                className="w-8 h-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark transition-colors flex items-center justify-center"
-                title="Model settings"
-              >
-                <Settings className="w-4 h-4 text-text-tertiary-light dark:text-text-tertiary-dark" />
-              </button>
-              <button
-                onClick={() => setShowApiKeyInput((v) => !v)}
-                className="w-8 h-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark transition-colors flex items-center justify-center"
-                title={savedApiKey ? 'API key configured' : 'Set API key'}
-              >
-                <Key className={`w-4 h-4 ${savedApiKey ? 'text-green-500' : 'text-text-tertiary-light dark:text-text-tertiary-dark'}`} />
-              </button>
-              <button
-                onClick={() => setAIPanelOpen(false)}
-                className="w-8 h-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark transition-colors flex items-center justify-center"
-              >
-                <X className="w-4 h-4 text-text-secondary-light dark:text-text-secondary-dark" />
-              </button>
-            </div>
+            <button
+              onClick={() => setAIPanelOpen(false)}
+              className="w-8 h-8 rounded-lg hover:bg-background-light dark:hover:bg-background-dark transition-colors flex items-center justify-center"
+            >
+              <X className="w-4 h-4 text-text-secondary-light dark:text-text-secondary-dark" />
+            </button>
           </div>
-
-          {/* API Key Setup */}
-          <AnimatePresence>
-            {showApiKeyInput && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="border-b border-border-light dark:border-border-dark overflow-hidden flex-shrink-0"
-              >
-                <div className="p-4 space-y-2">
-                  <p className="text-xs font-medium text-text-secondary-light dark:text-text-secondary-dark">
-                    OpenAI API Key
-                  </p>
-                  {!savedApiKey && (
-                    <div className="flex items-center gap-1.5 text-xs text-amber-500 bg-amber-500/10 rounded-lg px-2.5 py-1.5">
-                      <AlertCircle className="w-3.5 h-3.5 flex-shrink-0" />
-                      <span>Required for AI generation</span>
-                    </div>
-                  )}
-                  <div className="flex items-center gap-2">
-                    <div className="relative flex-1">
-                      <input
-                        type={showApiKeyText ? 'text' : 'password'}
-                        value={apiKey}
-                        onChange={(e) => setApiKey(e.target.value)}
-                        placeholder={savedApiKey ? 'Enter new key to replace…' : 'sk-…'}
-                        className="w-full bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded-lg px-3 py-2 text-sm text-text-primary-light dark:text-text-primary-dark outline-none focus:border-accent-warm/50 pr-8"
-                        onKeyDown={(e) => e.key === 'Enter' && void handleSaveApiKey()}
-                      />
-                      <button
-                        onClick={() => setShowApiKeyText((v) => !v)}
-                        className="absolute right-2 top-1/2 -translate-y-1/2 text-text-tertiary-light dark:text-text-tertiary-dark"
-                      >
-                        {showApiKeyText ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                      </button>
-                    </div>
-                    <button
-                      onClick={() => void handleSaveApiKey()}
-                      disabled={!apiKey.trim() || apiKeySaving}
-                      className="px-3 py-2 bg-accent-warm text-white rounded-lg text-sm font-medium disabled:opacity-40 hover:bg-accent-warm/90 transition-colors"
-                    >
-                      {apiKeySaving ? 'Saving…' : 'Save'}
-                    </button>
-                  </div>
-                  {savedApiKey && (
-                    <p className="text-xs text-green-500 flex items-center gap-1">
-                      <Check className="w-3 h-3" /> API key is configured
-                    </p>
-                  )}
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
-
-          {/* Model Settings */}
-          <AnimatePresence>
-            {showModelSettings && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="border-b border-border-light dark:border-border-dark overflow-hidden flex-shrink-0"
-              >
-                <div className="p-4 space-y-2">
-                  <p className="text-xs font-medium text-text-secondary-light dark:text-text-secondary-dark">
-                    Model Settings
-                  </p>
-                  <div className="space-y-2">
-                    <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
-                        Provider
-                      </label>
-                      <select
-                        value={modelProvider}
-                        onChange={(e) => {
-                          setModelProvider(e.target.value);
-                          if (e.target.value === 'openai') {
-                            setModelBaseUrl('https://api.openai.com/v1/chat/completions');
-                            setModelName('gpt-4o-mini');
-                          } else if (e.target.value === 'deepseek') {
-                            setModelBaseUrl('https://api.deepseek.com/v1/chat/completions');
-                            setModelName('deepseek-chat');
-                          } else if (e.target.value === 'zhipu') {
-                            setModelBaseUrl('https://open.bigmodel.cn/api/paas/v4/chat/completions');
-                            setModelName('glm-4-flash');
-                          } else if (e.target.value === 'qwen') {
-                            setModelBaseUrl('https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions');
-                            setModelName('qwen-turbo');
-                          }
-                        }}
-                        className="w-full bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded px-2 py-1.5 text-xs text-text-primary-light dark:text-text-primary-dark outline-none focus:border-accent-warm/50"
-                      >
-                        <option value="openai">OpenAI</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="zhipu">Zhipu (智谱)</option>
-                        <option value="qwen">Qwen (通义千问)</option>
-                        <option value="custom">Custom</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
-                        Model Name
-                      </label>
-                      <input
-                        type="text"
-                        value={modelName}
-                        onChange={(e) => setModelName(e.target.value)}
-                        placeholder="gpt-4o-mini"
-                        className="w-full bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded px-2 py-1.5 text-xs text-text-primary-light dark:text-text-primary-dark outline-none focus:border-accent-warm/50"
-                      />
-                    </div>
-                    <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
-                        API Base URL
-                      </label>
-                      <input
-                        type="text"
-                        value={modelBaseUrl}
-                        onChange={(e) => setModelBaseUrl(e.target.value)}
-                        placeholder="https://api.openai.com/v1/chat/completions"
-                        className="w-full bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded px-2 py-1.5 text-xs text-text-primary-light dark:text-text-primary-dark outline-none focus:border-accent-warm/50"
-                      />
-                    </div>
-                    <button
-                      onClick={() => void handleSaveModelSettings()}
-                      disabled={modelSaving}
-                      className="w-full px-3 py-1.5 bg-accent-warm text-white rounded-lg text-xs font-medium disabled:opacity-40 hover:bg-accent-warm/90 transition-colors"
-                    >
-                      {modelSaving ? 'Saving…' : 'Save Settings'}
-                    </button>
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
 
           {/* Action Selector */}
           <div className="flex border-b border-border-light dark:border-border-dark flex-shrink-0">
@@ -506,38 +362,144 @@ export default function AIPanel() {
             ))}
           </div>
 
-          {/* Task Type Selector */}
-          <div className="flex border-b border-border-light dark:border-border-dark flex-shrink-0 px-2 gap-1 overflow-x-auto">
-            {TASK_TYPES.map((task) => (
-              <button
-                key={task.key}
-                onClick={() => setActiveTaskType(task.key)}
-                className={`flex items-center gap-1 px-2.5 py-1.5 text-xs rounded-lg transition-colors whitespace-nowrap my-1 ${
-                  activeTaskType === task.key
-                    ? 'bg-accent-warm/10 text-accent-warm'
-                    : 'text-text-tertiary-light dark:text-text-tertiary-dark hover:bg-background-light dark:hover:bg-background-dark'
-                }`}
-                title={task.description}
-              >
-                <task.icon className="w-3 h-3" />
-                {task.label}
-              </button>
-            ))}
-          </div>
+          {/* Writing Goal Section */}
+          <div className="border-b border-border-light dark:border-border-dark flex-shrink-0 p-3 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium text-text-secondary-light dark:text-text-secondary-dark">
+                Writing Goal
+              </label>
+              <div className="flex items-center gap-1">
+                {/* Templates dropdown */}
+                <div className="relative" ref={templateMenuRef}>
+                  {hasTemplates && (
+                    <button
+                      onClick={() => { setShowTemplates((v) => !v); setShowTemplateSaveInput(false); }}
+                      className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-tertiary-light dark:text-text-tertiary-dark hover:bg-background-light dark:hover:bg-background-dark transition-colors"
+                      title="Load template"
+                    >
+                      <Bookmark className="w-3 h-3" />
+                      Templates
+                      <ChevronDown className="w-2.5 h-2.5" />
+                    </button>
+                  )}
 
-          {/* Task-specific fields */}
-          <AnimatePresence>
-            {activeTaskType && (
-              <motion.div
-                initial={{ height: 0, opacity: 0 }}
-                animate={{ height: 'auto', opacity: 1 }}
-                exit={{ height: 0, opacity: 0 }}
-                className="border-b border-border-light dark:border-border-dark overflow-hidden flex-shrink-0"
-              >
-                <div className="p-3 space-y-2">
-                  <div className="grid grid-cols-2 gap-2">
+                  <AnimatePresence>
+                    {showTemplates && hasTemplates && (
+                      <motion.div
+                        initial={{ opacity: 0, scale: 0.96, y: -4 }}
+                        animate={{ opacity: 1, scale: 1, y: 0 }}
+                        exit={{ opacity: 0, scale: 0.96, y: -4 }}
+                        transition={{ duration: 0.12 }}
+                        className="absolute right-0 top-full mt-1 w-56 bg-card-light dark:bg-card-dark rounded-lg shadow-ambient-lg dark:shadow-ambient-lg-dark border border-border-light dark:border-border-dark overflow-hidden z-50"
+                      >
+                        <div className="max-h-48 overflow-y-auto">
+                          {templates.map((tpl) => (
+                            <div
+                              key={tpl.id}
+                              className="flex items-center group hover:bg-background-light dark:hover:bg-background-dark"
+                            >
+                              <button
+                                onClick={() => handleLoadTemplate(tpl)}
+                                className="flex-1 text-left px-3 py-2"
+                              >
+                                <p className="text-xs font-medium text-text-primary-light dark:text-text-primary-dark truncate">
+                                  {tpl.name}
+                                </p>
+                                <p className="text-[10px] text-text-tertiary-light dark:text-text-tertiary-dark truncate">
+                                  {tpl.goal.slice(0, 50)}
+                                </p>
+                              </button>
+                              <button
+                                onClick={() => handleDeleteTemplate(tpl.id)}
+                                className="px-2 py-2 text-text-tertiary-light dark:text-text-tertiary-dark hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
+                                title="Delete template"
+                              >
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </motion.div>
+                    )}
+                  </AnimatePresence>
+                </div>
+
+                {/* Save template button */}
+                <button
+                  onClick={() => setShowTemplateSaveInput((v) => !v)}
+                  disabled={!goal.trim()}
+                  className="flex items-center gap-1 px-2 py-1 rounded text-xs text-text-tertiary-light dark:text-text-tertiary-dark hover:bg-background-light dark:hover:bg-background-dark transition-colors disabled:opacity-30"
+                  title="Save as template"
+                >
+                  <Save className="w-3 h-3" />
+                </button>
+
+                {/* Expand/collapse writing fields */}
+                <button
+                  onClick={() => setShowWritingFields((v) => !v)}
+                  className={`flex items-center gap-1 px-2 py-1 rounded text-xs transition-colors ${
+                    showWritingFields
+                      ? 'text-accent-warm bg-accent-warm/5'
+                      : 'text-text-tertiary-light dark:text-text-tertiary-dark hover:bg-background-light dark:hover:bg-background-dark'
+                  }`}
+                  title="More options"
+                >
+                  <ChevronDown className={`w-3 h-3 transition-transform ${showWritingFields ? 'rotate-180' : ''}`} />
+                </button>
+              </div>
+            </div>
+
+            {/* Template save input */}
+            <AnimatePresence>
+              {showTemplateSaveInput && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="flex items-center gap-2 pb-1">
+                    <input
+                      type="text"
+                      value={templateSaveName}
+                      onChange={(e) => setTemplateSaveName(e.target.value)}
+                      placeholder="Template name..."
+                      className="flex-1 bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded px-2 py-1 text-xs text-text-primary-light dark:text-text-primary-dark outline-none focus:border-accent-warm/50"
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveTemplate()}
+                    />
+                    <button
+                      onClick={handleSaveTemplate}
+                      disabled={!templateSaveName.trim() || !goal.trim()}
+                      className="px-2 py-1 bg-accent-warm text-white rounded text-xs font-medium disabled:opacity-40 hover:bg-accent-warm/90 transition-colors"
+                    >
+                      Save
+                    </button>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+
+            {/* Goal textarea */}
+            <textarea
+              value={goal}
+              onChange={(e) => setGoal(e.target.value)}
+              placeholder="Describe your writing goal — e.g. 'Write a WeChat article about AI trends' or 'Draft a professional email response to a client'..."
+              rows={2}
+              className="w-full bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded-lg px-3 py-2 text-xs text-text-primary-light dark:text-text-primary-dark placeholder:text-text-tertiary-light dark:placeholder:text-text-tertiary-dark outline-none focus:border-accent-warm/50 resize-none transition-colors"
+            />
+
+            {/* Expanded fields */}
+            <AnimatePresence>
+              {showWritingFields && (
+                <motion.div
+                  initial={{ height: 0, opacity: 0 }}
+                  animate={{ height: 'auto', opacity: 1 }}
+                  exit={{ height: 0, opacity: 0 }}
+                  className="overflow-hidden"
+                >
+                  <div className="grid grid-cols-2 gap-2 pt-1">
                     <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
+                      <label className="text-[10px] text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
                         Audience
                       </label>
                       <input
@@ -549,7 +511,7 @@ export default function AIPanel() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
+                      <label className="text-[10px] text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
                         Language
                       </label>
                       <select
@@ -564,7 +526,7 @@ export default function AIPanel() {
                       </select>
                     </div>
                     <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
+                      <label className="text-[10px] text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
                         Length
                       </label>
                       <input
@@ -576,7 +538,7 @@ export default function AIPanel() {
                       />
                     </div>
                     <div>
-                      <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
+                      <label className="text-[10px] text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
                         Output
                       </label>
                       <select
@@ -591,22 +553,10 @@ export default function AIPanel() {
                       </select>
                     </div>
                   </div>
-                  <div>
-                    <label className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark block mb-0.5">
-                      Goal
-                    </label>
-                    <input
-                      type="text"
-                      value={goal}
-                      onChange={(e) => setGoal(e.target.value)}
-                      placeholder="What should this writing achieve?"
-                      className="w-full bg-card-light dark:bg-card-dark border border-border-light dark:border-border-dark rounded px-2 py-1 text-xs text-text-primary-light dark:text-text-primary-dark outline-none focus:border-accent-warm/50"
-                    />
-                  </div>
-                </div>
-              </motion.div>
-            )}
-          </AnimatePresence>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
 
           {/* Messages Area */}
           <StreamingComposer
@@ -749,17 +699,6 @@ export default function AIPanel() {
                 <X className="w-3.5 h-3.5 text-text-tertiary-light dark:text-text-tertiary-dark" />
               </button>
             </div>
-
-            {/* No API key warning */}
-            {isTauri && !savedApiKey && !showApiKeyInput && (
-              <button
-                onClick={() => setShowApiKeyInput(true)}
-                className="w-full flex items-center gap-2 px-3 py-2 rounded-lg bg-amber-500/10 border border-amber-500/20 text-xs text-amber-600 dark:text-amber-400 hover:bg-amber-500/15 transition-colors"
-              >
-                <Key className="w-3.5 h-3.5 flex-shrink-0" />
-                <span>Add your OpenAI API key to enable AI generation →</span>
-              </button>
-            )}
 
             {/* Text input */}
             <div className="flex items-end gap-2">
