@@ -10,45 +10,45 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Warm Productivity Palette — light uses CSS vars for consistency, dark uses them for theming
+        // Warm Productivity Palette
         background: {
-          light: 'rgb(var(--tw-bg-light-rgb) / <alpha-value>)',
-          dark: 'rgb(var(--tw-bg-dark-rgb) / <alpha-value>)',
+          light: '#F7F5F2',  // Starbucks Cream
+          dark: '#121212',   // Deep charcoal
         },
         card: {
-          light: 'rgb(var(--tw-card-light-rgb) / <alpha-value>)',
-          dark: 'rgb(var(--tw-card-dark-rgb) / <alpha-value>)',
+          light: '#FFFFFF',
+          dark: '#1E1E1E',
         },
         surface: {
-          light: 'rgb(var(--tw-surface-light-rgb) / <alpha-value>)',
-          dark: 'rgb(var(--tw-surface-dark-rgb) / <alpha-value>)',
+          light: '#FEFEFE',
+          dark: '#252525',
         },
         border: {
-          light: 'rgb(var(--tw-border-light-rgb) / <alpha-value>)',
-          dark: 'rgb(var(--tw-border-dark-rgb) / <alpha-value>)',
+          light: '#E8E6E3',
+          dark: '#2A2A2A',
         },
         text: {
           primary: {
-            light: 'rgb(var(--tw-text-primary-light-rgb) / <alpha-value>)',
-            dark: 'rgb(var(--tw-text-primary-dark-rgb) / <alpha-value>)',
+            light: '#1A1A1A',
+            dark: '#F5F5F5',
           },
           secondary: {
-            light: 'rgb(var(--tw-text-secondary-light-rgb) / <alpha-value>)',
-            dark: 'rgb(var(--tw-text-secondary-dark-rgb) / <alpha-value>)',
+            light: '#6B6B6B',
+            dark: '#A0A0A0',
           },
           tertiary: {
-            light: 'rgb(var(--tw-text-tertiary-light-rgb) / <alpha-value>)',
-            dark: 'rgb(var(--tw-text-tertiary-dark-rgb) / <alpha-value>)',
+            light: '#9B9B9B',
+            dark: '#707070',
           },
         },
         accent: {
-          warm: 'rgb(var(--tw-accent-warm-rgb) / <alpha-value>)',
-          cool: 'rgb(var(--tw-accent-cool-rgb) / <alpha-value>)',
-          primary: 'rgb(var(--tw-accent-primary-rgb) / <alpha-value>)',
+          warm: '#D4A574',    // Warm gold
+          cool: '#7B9EA8',    // Soft teal
+          primary: '#2D5F7E', // Deep blue
         },
         icon: {
-          inactive: 'rgb(var(--tw-icon-inactive-rgb) / <alpha-value>)',
-          active: 'rgb(var(--tw-icon-active-rgb) / <alpha-value>)',
+          inactive: '#A09E9B', // Soft desaturated grey for collapsed icons
+          active: '#D4A574',   // Warm gold for active state
         },
       },
       fontFamily: {

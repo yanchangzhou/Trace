@@ -2,27 +2,22 @@
 
 import { createContext, useContext, useState, ReactNode } from 'react';
 
-export const MIN_SIDEBAR_WIDTH = 120;
-export const MAX_SIDEBAR_WIDTH = 400;
-const DEFAULT_EXPANDED = 150;
-
 interface SidebarContextType {
   isCollapsed: boolean;
   setIsCollapsed: (collapsed: boolean) => void;
   sidebarWidth: number;
-  expandedWidth: number;
-  setExpandedWidth: (width: number) => void;
 }
 
 const SidebarContext = createContext<SidebarContextType | undefined>(undefined);
 
 export function SidebarProvider({ children }: { children: ReactNode }) {
   const [isCollapsed, setIsCollapsed] = useState(false);
-  const [expandedWidth, setExpandedWidth] = useState(DEFAULT_EXPANDED);
-  const sidebarWidth = isCollapsed ? 64 : expandedWidth;
+  
+  // Calculate sidebar width based on collapsed state
+  const sidebarWidth = isCollapsed ? 64 : 280;
 
   return (
-    <SidebarContext.Provider value={{ isCollapsed, setIsCollapsed, sidebarWidth, expandedWidth, setExpandedWidth }}>
+    <SidebarContext.Provider value={{ isCollapsed, setIsCollapsed, sidebarWidth }}>
       {children}
     </SidebarContext.Provider>
   );
