@@ -8,21 +8,24 @@ interface FilePreviewContextType {
   isOpen: boolean;
   currentFile: SourceFile | null;
   previewWidth: number;
+  highlightLocator: string | null;
   setPreviewWidth: (width: number) => void;
-  openPreview: (file: SourceFile) => void;
+  openPreview: (file: SourceFile, locator?: string) => void;
   closePreview: () => void;
+  clearHighlightLocator: () => void;
 }
 
 const FilePreviewContext = createContext<FilePreviewContextType | undefined>(undefined);
 
 const MIN_WIDTH = 400;
-const DEFAULT_WIDTH = 720;
+const DEFAULT_WIDTH = 600;
 const EDITOR_RESERVE_PX = 300;
 
 export function FilePreviewProvider({ children }: { children: ReactNode }) {
   const { sidebarWidth } = useSidebar();
   const [isOpen, setIsOpen] = useState(false);
   const [currentFile, setCurrentFile] = useState<SourceFile | null>(null);
+  const [highlightLocator, setHighlightLocator] = useState<string | null>(null);
   const [previewWidth, setPreviewWidthState] = useState(DEFAULT_WIDTH);
 
   const getMaxPreviewWidth = useCallback(() => {
@@ -44,15 +47,21 @@ export function FilePreviewProvider({ children }: { children: ReactNode }) {
     return () => window.removeEventListener('resize', onResize);
   }, [getMaxPreviewWidth]);
 
-  const openPreview = (file: SourceFile) => {
+  const openPreview = (file: SourceFile, locator?: string) => {
     setCurrentFile(file);
+    setHighlightLocator(locator || null);
     setIsOpen(true);
   };
 
   const closePreview = () => {
     setIsOpen(false);
-    setTimeout(() => setCurrentFile(null), 300);
+    setTimeout(() => {
+      setCurrentFile(null);
+      setHighlightLocator(null);
+    }, 300);
   };
+
+  const clearHighlightLocator = () => setHighlightLocator(null);
 
   const setPreviewWidth = (width: number) => {
     const maxWidth = getMaxPreviewWidth();
@@ -66,9 +75,11 @@ export function FilePreviewProvider({ children }: { children: ReactNode }) {
         isOpen,
         currentFile,
         previewWidth: isOpen ? previewWidth : 0,
+        highlightLocator,
         setPreviewWidth,
         openPreview,
         closePreview,
+        clearHighlightLocator,
       }}
     >
       {children}

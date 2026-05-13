@@ -1,17 +1,12 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Search, File, FileText, Image, Video, Music, X, FileSearch } from 'lucide-react';
+import { Search, File, FileText, Image, Video, Music, X, Quote, ArrowRight } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
-import {
-  searchLocalFiles,
-  searchDocuments,
-  openFile,
-  formatFileSize,
-  formatDate,
-  type SearchResult,
-  type DocumentSearchResult,
-} from '@/lib/tauri';
+import { searchLocalFiles, openFile, formatFileSize, formatDate, searchDocuments } from '@/lib/tauri';
+import { useFilePreview } from '@/contexts/FilePreviewContext';
+import { useBook } from '@/contexts/BookContext';
+import type { SearchResult, ContentSearchResult } from '@/types';
 
 const springConfig = {
   type: 'spring' as const,
@@ -19,59 +14,54 @@ const springConfig = {
   damping: 20,
 };
 
-type SearchTab = 'files' | 'content';
-
 interface SpotlightSearchProps {
   isOpen: boolean;
   onClose: () => void;
-  onQuickLook?: (filePath: string) => void;
 }
 
-export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: SpotlightSearchProps) {
+export default function SpotlightSearch({ isOpen, onClose }: SpotlightSearchProps) {
   const [query, setQuery] = useState('');
   const [fileResults, setFileResults] = useState<SearchResult[]>([]);
-  const [contentResults, setContentResults] = useState<DocumentSearchResult[]>([]);
+  const [contentResults, setContentResults] = useState<ContentSearchResult[]>([]);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
-  const [activeTab, setActiveTab] = useState<SearchTab>('files');
+  const [searchMode, setSearchMode] = useState<'files' | 'content'>('files');
+  const { openPreview } = useFilePreview();
+  const { currentFiles } = useBook();
 
-  // Get icon based on file extension
+  const totalResults = searchMode === 'content' ? contentResults : fileResults;
+  const results = totalResults;
+
   const getFileIcon = (extension: string) => {
     const ext = extension.toLowerCase();
-    if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
-      return <FileText className="w-5 h-5" />;
-    }
-    if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(ext)) {
-      return <Image className="w-5 h-5" />;
-    }
-    if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) {
-      return <Video className="w-5 h-5" />;
-    }
-    if (['mp3', 'wav', 'flac', 'm4a'].includes(ext)) {
-      return <Music className="w-5 h-5" />;
-    }
+    if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) return <FileText className="w-5 h-5" />;
+    if (['jpg', 'jpeg', 'png', 'gif', 'svg', 'webp'].includes(ext)) return <Image className="w-5 h-5" />;
+    if (['mp4', 'mov', 'avi', 'mkv'].includes(ext)) return <Video className="w-5 h-5" />;
+    if (['mp3', 'wav', 'flac', 'm4a'].includes(ext)) return <Music className="w-5 h-5" />;
     return <File className="w-5 h-5" />;
   };
 
-  // Get icon for content results (from file name)
-  const getContentIcon = (fileName: string) => {
-    const ext = fileName.split('.').pop()?.toLowerCase() || '';
-    if (['pdf', 'doc', 'docx', 'txt', 'md'].includes(ext)) {
-      return <FileSearch className="w-5 h-5" />;
-    }
-    return <FileText className="w-5 h-5" />;
+  // Highlight matching terms in text
+  const highlightMatches = (text: string, terms?: string[]) => {
+    if (!terms || terms.length === 0) return text;
+    const pattern = terms
+      .map((t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+      .join('|');
+    const regex = new RegExp(`(${pattern})`, 'gi');
+    const parts = text.split(regex);
+    return parts.map((part, i) =>
+      regex.test(part) ? (
+        <mark key={i} className="bg-accent-warm/30 dark:bg-accent-warm/40 text-inherit rounded-sm px-0.5">
+          {part}
+        </mark>
+      ) : (
+        part
+      ),
+    );
   };
 
-  // Get total result count based on active tab
-  const totalResults = activeTab === 'files' ? fileResults.length : contentResults.length;
-
-  // Flat list of all results for keyboard navigation
-  const allResults = activeTab === 'files'
-    ? fileResults.map((r, i) => ({ type: 'file' as const, index: i, path: r.path }))
-    : contentResults.map((r, i) => ({ type: 'content' as const, index: i, path: r.file_id }));
-
-  // Search with debounce — both file names and content
+  // Search with debounce
   useEffect(() => {
     if (!query.trim()) {
       setFileResults([]);
@@ -82,17 +72,26 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
     setIsSearching(true);
     const timer = setTimeout(async () => {
       try {
-        const [fileRes, contentRes] = await Promise.all([
-          searchLocalFiles(query).catch(() => [] as SearchResult[]),
-          searchDocuments(query, undefined, 20).catch(() => [] as DocumentSearchResult[]),
-        ]);
-        setFileResults(fileRes);
-        setContentResults(contentRes);
-        setSelectedIndex(0);
-        // Auto-switch to content tab if files are empty
-        if (fileRes.length === 0 && contentRes.length > 0) {
-          setActiveTab('content');
+        // Try content search first, fall back to filename search
+        try {
+          const content = await searchDocuments(query);
+          if (content && content.length > 0) {
+            setContentResults(content);
+            setFileResults([]);
+            setSearchMode('content');
+            setSelectedIndex(0);
+            setIsSearching(false);
+            return;
+          }
+        } catch {
+          // Content search not available, use filename search
         }
+
+        const fileSearch = await searchLocalFiles(query);
+        setFileResults(fileSearch);
+        setContentResults([]);
+        setSearchMode('files');
+        setSelectedIndex(0);
       } catch (error) {
         console.error('Search error:', error);
         setFileResults([]);
@@ -105,36 +104,53 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
     return () => clearTimeout(timer);
   }, [query]);
 
+  // Handle result click: open preview panel or open file
+  const handleResultClick = useCallback(
+    (result: SearchResult | ContentSearchResult) => {
+      if ('chunk_id' in result) {
+        // Content search result - open in preview panel
+        const sourceFile = currentFiles.find(
+          (f) => f.path === result.path || f.id === result.file_id,
+        );
+        if (sourceFile) {
+          openPreview(sourceFile);
+          onClose();
+          return;
+        }
+      }
+
+      // Filename search - try preview first, fall back to OS open
+      const sourceFile = currentFiles.find((f) => f.path === result.path);
+      if (sourceFile) {
+        openPreview(sourceFile);
+      } else {
+        handleOpenFile(result.path);
+      }
+      onClose();
+    },
+    [currentFiles, openPreview, onClose],
+  );
+
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'ArrowDown') {
         e.preventDefault();
-        setSelectedIndex((prev) => Math.min(prev + 1, totalResults - 1));
+        setSelectedIndex((prev) => Math.min(prev + 1, Math.max(0, results.length - 1)));
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         setSelectedIndex((prev) => Math.max(prev - 1, 0));
-      } else if (e.key === 'Enter' && totalResults > 0) {
+      } else if (e.key === 'Enter' && results[selectedIndex]) {
         e.preventDefault();
-        const result = allResults[selectedIndex];
-        if (result) handleOpenFile(result.path);
-      } else if (e.key === ' ' && totalResults > 0 && onQuickLook) {
-        e.preventDefault();
-        const result = allResults[selectedIndex];
-        if (result) onQuickLook(result.path);
+        handleResultClick(results[selectedIndex]);
       } else if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
-      } else if (e.key === 'Tab') {
-        e.preventDefault();
-        setActiveTab((prev) => (prev === 'files' ? 'content' : 'files'));
-        setSelectedIndex(0);
       }
     },
-    [allResults, selectedIndex, totalResults, onClose, onQuickLook]
+    [results, selectedIndex, onClose, handleResultClick],
   );
 
-  // Open file
   const handleOpenFile = async (path: string) => {
     try {
       await openFile(path);
@@ -147,12 +163,13 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
   // Reset state when closed
   useEffect(() => {
     if (!isOpen) {
-      setQuery('');
-      setFileResults([]);
-      setContentResults([]);
-      setSelectedIndex(0);
-      setHoveredIndex(null);
-      setActiveTab('files');
+      setTimeout(() => {
+        setQuery('');
+        setFileResults([]);
+        setContentResults([]);
+        setSelectedIndex(0);
+        setHoveredIndex(null);
+      }, 200);
     }
   }, [isOpen]);
 
@@ -160,7 +177,6 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
     <AnimatePresence>
       {isOpen && (
         <>
-          {/* Backdrop */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
@@ -169,7 +185,6 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
             className="fixed inset-0 bg-black/40 backdrop-blur-sm z-50"
           />
 
-          {/* Search Modal */}
           <div className="fixed inset-0 flex items-start justify-center pt-[15vh] z-50 pointer-events-none">
             <motion.div
               initial={{ opacity: 0, scale: 0.95, y: -20 }}
@@ -187,7 +202,7 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
                     value={query}
                     onChange={(e) => setQuery(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    placeholder="Search files in TraceDocs..."
+                    placeholder="Search documents by content or filename..."
                     autoFocus
                     className="flex-1 bg-transparent border-none outline-none text-text-primary-light dark:text-text-primary-dark placeholder:text-text-tertiary-light dark:placeholder:text-text-tertiary-dark text-lg tracking-tight"
                   />
@@ -201,188 +216,134 @@ export default function SpotlightSearch({ isOpen, onClose, onQuickLook }: Spotli
                   )}
                 </div>
 
-                {/* Tab Bar */}
-                {query && (
-                  <div className="flex items-center gap-0 px-6 border-b border-border-light/50 dark:border-border-dark/50">
-                    <button
-                      onClick={() => { setActiveTab('files'); setSelectedIndex(0); }}
-                      className={`px-4 py-2 text-xs font-medium tracking-tight border-b-2 transition-colors ${
-                        activeTab === 'files'
-                          ? 'border-accent-warm text-accent-warm'
-                          : 'border-transparent text-text-tertiary-light dark:text-text-tertiary-dark hover:text-text-secondary-light dark:hover:text-text-secondary-dark'
-                      }`}
-                    >
-                      Files ({fileResults.length})
-                    </button>
-                    <button
-                      onClick={() => { setActiveTab('content'); setSelectedIndex(0); }}
-                      className={`px-4 py-2 text-xs font-medium tracking-tight border-b-2 transition-colors ${
-                        activeTab === 'content'
-                          ? 'border-accent-warm text-accent-warm'
-                          : 'border-transparent text-text-tertiary-light dark:text-text-tertiary-dark hover:text-text-secondary-light dark:hover:text-text-secondary-dark'
-                      }`}
-                    >
-                      Content ({contentResults.length})
-                    </button>
-                  </div>
-                )}
-
                 {/* Results */}
                 <div className="max-h-[60vh] overflow-y-auto">
                   {isSearching && (
                     <div className="px-6 py-8 text-center text-text-tertiary-light dark:text-text-tertiary-dark">
-                      Searching...
+                      <motion.div
+                        animate={{ rotate: 360 }}
+                        transition={{ duration: 1, repeat: Infinity, ease: 'linear' }}
+                        className="w-5 h-5 border-2 border-accent-warm border-t-transparent rounded-full mx-auto mb-3"
+                      />
+                      Searching documents...
                     </div>
                   )}
 
-                  {!isSearching && query && totalResults === 0 && (
+                  {!isSearching && query && results.length === 0 && (
                     <div className="px-6 py-8 text-center text-text-tertiary-light dark:text-text-tertiary-dark">
-                      No {activeTab === 'files' ? 'files' : 'content'} found for "{query}"
+                      No results found for &ldquo;{query}&rdquo;
                     </div>
                   )}
 
-                  {/* File Results */}
-                  {!isSearching && activeTab === 'files' && fileResults.length > 0 && (
+                  {!isSearching && results.length > 0 && (
                     <div className="py-2">
-                      {fileResults.map((result, index) => (
-                        <motion.div
-                          key={result.path}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.02 }}
-                          onClick={() => handleOpenFile(result.path)}
-                          onMouseEnter={() => {
-                            setHoveredIndex(index);
-                            setSelectedIndex(index);
-                          }}
-                          onMouseLeave={() => setHoveredIndex(null)}
-                          className={`px-6 py-3 cursor-pointer transition-colors ${
-                            selectedIndex === index
-                              ? 'bg-surface-light dark:bg-surface-dark'
-                              : 'hover:bg-surface-light/50 dark:hover:bg-surface-dark/50'
-                          }`}
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className="mt-1 text-accent-warm flex-shrink-0">
-                              {getFileIcon(result.extension)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-baseline gap-2">
-                                <p className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark truncate tracking-tight">
-                                  {result.name}
-                                </p>
-                                <span className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark uppercase tracking-wider flex-shrink-0">
-                                  {result.extension}
-                                </span>
-                              </div>
-                              <AnimatePresence>
-                                {hoveredIndex === index && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    className="mt-2 space-y-1"
-                                  >
-                                    <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark truncate">
-                                      {result.path}
-                                    </p>
-                                    <div className="flex items-center gap-3 text-xs text-text-tertiary-light dark:text-text-tertiary-dark">
-                                      <span>{formatFileSize(result.size)}</span>
-                                      <span>&bull;</span>
-                                      <span>{formatDate(result.last_modified)}</span>
-                                    </div>
-                                  </motion.div>
-                                )}
-                              </AnimatePresence>
-                            </div>
-                          </div>
-                        </motion.div>
-                      ))}
-                    </div>
-                  )}
+                      {searchMode === 'content' && (
+                        <div className="px-6 py-1.5 text-xs text-text-tertiary-light dark:text-text-tertiary-dark uppercase tracking-wider">
+                          Content matches
+                        </div>
+                      )}
+                      {results.map((result, index) => {
+                        const isContent = 'chunk_id' in result;
+                        const contentResult = isContent ? (result as ContentSearchResult) : null;
+                        const fileResult = !isContent ? (result as SearchResult) : null;
+                        const ext = isContent
+                          ? (contentResult!.file_name.split('.').pop() || '')
+                          : (fileResult!.extension);
 
-                  {/* Content Results */}
-                  {!isSearching && activeTab === 'content' && contentResults.length > 0 && (
-                    <div className="py-2">
-                      {contentResults.map((result, index) => (
-                        <motion.div
-                          key={`${result.file_id}-${result.chunk_id ?? index}`}
-                          initial={{ opacity: 0, y: 10 }}
-                          animate={{ opacity: 1, y: 0 }}
-                          transition={{ delay: index * 0.02 }}
-                          onClick={() => handleOpenFile(result.file_id)}
-                          onMouseEnter={() => {
-                            setHoveredIndex(index);
-                            setSelectedIndex(index);
-                          }}
-                          onMouseLeave={() => setHoveredIndex(null)}
-                          className={`px-6 py-3 cursor-pointer transition-colors ${
-                            selectedIndex === index
-                              ? 'bg-surface-light dark:bg-surface-dark'
-                              : 'hover:bg-surface-light/50 dark:hover:bg-surface-dark/50'
-                          }`}
-                        >
-                          <div className="flex items-start gap-4">
-                            <div className="mt-1 text-accent-warm flex-shrink-0">
-                              {getContentIcon(result.file_name)}
-                            </div>
-                            <div className="flex-1 min-w-0">
-                              <div className="flex items-baseline gap-2">
-                                <p className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark truncate tracking-tight">
-                                  {result.file_name}
-                                </p>
-                                <span className="text-xs text-accent-warm font-medium flex-shrink-0">
-                                  {result.score.toFixed(1)}
-                                </span>
+                        return (
+                          <motion.div
+                            key={isContent ? contentResult!.chunk_id : fileResult!.path}
+                            initial={{ opacity: 0, y: 10 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: index * 0.02 }}
+                            onClick={() => handleResultClick(result)}
+                            onMouseEnter={() => {
+                              setHoveredIndex(index);
+                              setSelectedIndex(index);
+                            }}
+                            onMouseLeave={() => setHoveredIndex(null)}
+                            className={`px-6 py-3 cursor-pointer transition-colors ${
+                              selectedIndex === index
+                                ? 'bg-surface-light dark:bg-surface-dark'
+                                : 'hover:bg-surface-light/50 dark:hover:bg-surface-dark/50'
+                            }`}
+                          >
+                            <div className="flex items-start gap-4">
+                              <div className="mt-1 text-accent-warm flex-shrink-0">
+                                {getFileIcon(ext)}
                               </div>
-                              {result.snippet && (
-                                <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark mt-1 line-clamp-3">
-                                  {result.snippet.substring(0, 300)}
-                                  {result.snippet.length > 300 ? '...' : ''}
-                                </p>
-                              )}
-                              <AnimatePresence>
-                                {hoveredIndex === index && result.matched_terms.length > 0 && (
-                                  <motion.div
-                                    initial={{ opacity: 0, height: 0 }}
-                                    animate={{ opacity: 1, height: 'auto' }}
-                                    exit={{ opacity: 0, height: 0 }}
-                                    className="mt-2"
-                                  >
-                                    <div className="flex items-center gap-1 flex-wrap">
-                                      {result.matched_terms.map((term, i) => (
-                                        <span
-                                          key={i}
-                                          className="px-2 py-0.5 bg-accent-warm/10 text-accent-warm text-xs rounded-full"
-                                        >
-                                          {term}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  </motion.div>
+
+                              <div className="flex-1 min-w-0">
+                                <div className="flex items-baseline gap-2">
+                                  <p className="text-sm font-medium text-text-primary-light dark:text-text-primary-dark truncate tracking-tight">
+                                    {isContent ? contentResult!.file_name : fileResult!.name}
+                                  </p>
+                                  <span className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark uppercase tracking-wider flex-shrink-0">
+                                    {ext}
+                                  </span>
+                                </div>
+
+                                {/* Content snippet for content search results */}
+                                {isContent && contentResult!.snippet && (
+                                  <div className="mt-1.5 text-xs text-text-secondary-light dark:text-text-secondary-dark leading-relaxed line-clamp-2">
+                                    <Quote className="w-3 h-3 inline mr-1 text-text-tertiary-light dark:text-text-tertiary-dark" />
+                                    {highlightMatches(contentResult!.snippet, contentResult!.matched_terms)}
+                                  </div>
                                 )}
-                              </AnimatePresence>
+
+                                {/* Hover detail */}
+                                <AnimatePresence>
+                                  {hoveredIndex === index && (
+                                    <motion.div
+                                      initial={{ opacity: 0, height: 0 }}
+                                      animate={{ opacity: 1, height: 'auto' }}
+                                      exit={{ opacity: 0, height: 0 }}
+                                      className="mt-2 space-y-1"
+                                    >
+                                      {!isContent && fileResult && (
+                                        <>
+                                          <p className="text-xs text-text-secondary-light dark:text-text-secondary-dark truncate">
+                                            {fileResult.path}
+                                          </p>
+                                          <div className="flex items-center gap-3 text-xs text-text-tertiary-light dark:text-text-tertiary-dark">
+                                            <span>{formatFileSize(fileResult.size)}</span>
+                                            <span>&bull;</span>
+                                            <span>{formatDate(fileResult.last_modified)}</span>
+                                          </div>
+                                        </>
+                                      )}
+                                      <div className="flex items-center gap-1 text-xs text-accent-warm">
+                                        <ArrowRight className="w-3 h-3" />
+                                        <span>Open in preview panel</span>
+                                      </div>
+                                    </motion.div>
+                                  )}
+                                </AnimatePresence>
+                              </div>
                             </div>
-                          </div>
-                        </motion.div>
-                      ))}
+                          </motion.div>
+                        );
+                      })}
                     </div>
                   )}
                 </div>
 
                 {/* Footer */}
-                {totalResults > 0 && (
+                {results.length > 0 && (
                   <div className="px-6 py-3 border-t border-border-light dark:border-border-dark flex items-center justify-between text-xs text-text-tertiary-light dark:text-text-tertiary-dark">
                     <div className="flex items-center gap-4">
-                      <span>{totalResults} result{totalResults !== 1 ? 's' : ''}</span>
+                      <span>
+                        {results.length} result{results.length !== 1 ? 's' : ''}
+                      </span>
+                      {searchMode === 'content' && (
+                        <span className="text-accent-warm">Content search</span>
+                      )}
                     </div>
                     <div className="flex items-center gap-2">
-                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded">Tab</kbd>
-                      <span>Switch</span>
-                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded ml-1">↑↓</kbd>
+                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded">&uarr;&darr;</kbd>
                       <span>Navigate</span>
-                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded ml-1">↵</kbd>
-                      <span>Open</span>
+                      <kbd className="px-2 py-1 bg-surface-light dark:bg-surface-dark rounded ml-2">&crarr;</kbd>
+                      <span>Preview</span>
                     </div>
                   </div>
                 )}

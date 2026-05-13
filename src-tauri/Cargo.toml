@@ -24,15 +24,15 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 once_cell = "1.19"
 dirs = "5.0"
-sqlx = { version = "0.8", features = ["runtime-tokio", "sqlite"] }
-# Document parsing dependencies
+# Document parsing dependencies (PDF preview uses frontend pdf.js; no pdf-extract)
 docx-rs = "0.4"
 zip = "0.6"
 xml-rs = "0.8"
-pdf-extract = "0.8"
-unicode-segmentation = "1.11"
-# Secure credential storage (macOS Keychain / Windows Credential Manager / Linux Secret Service)
-keyring = "3"
+# Database (SQLite via rusqlite with bundled sqlite3)
+rusqlite = { version = "0.31", features = ["bundled"] }
+uuid = { version = "1", features = ["v4"] }
+# HTTP client for AI API calls
+reqwest = { version = "0.12", features = ["json", "stream"] }
 
 [features]
 default = ["custom-protocol"]

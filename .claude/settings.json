@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(npx tailwindcss *)",
-      "Bash(node -e \"const p = require\\('./package.json'\\); console.log\\(JSON.stringify\\({tailwindcss: p.devDependencies?.tailwindcss || p.dependencies?.tailwindcss}, null, 2\\)\\)\")",
-      "Bash(npx next *)"
-    ]
-  }
-}
