@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Sparkles, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
@@ -17,6 +17,8 @@ import { useFilePreview } from '@/contexts/FilePreviewContext';
 import { useEditorContext } from '@/contexts/EditorContext';
 import { useBook } from '@/contexts/BookContext';
 import { createNote, updateNote, isTauriEnvironment } from '@/lib/tauri';
+import { registerAIActionHandler, type AIActionType } from '@/lib/ai-trigger';
+import AIInlinePopup from '@/components/ai/AIInlinePopup';
 import EditorToolbar from './EditorToolbar';
 import { SlashCommand } from './suggestion';
 import { BlockDragExtension } from './BlockDragExtension';
@@ -38,7 +40,6 @@ export default function EditorShell() {
     setNoteId,
     saveStatus,
     setSaveStatus,
-    toggleAIPanel,
     registerInsertHandler,
     registerAIInsertHandler,
     registerAIReplaceHandler,
@@ -50,6 +51,7 @@ export default function EditorShell() {
   } = useEditorContext();
 
   const [plainText, setPlainText] = useState('');
+  const [aiInlineAction, setAiInlineAction] = useState<AIActionType | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
   // Track the last persisted note ID so title-change autosave only fires
   // after the note exists in the DB.
@@ -215,6 +217,29 @@ export default function EditorShell() {
     return () => registerAIGetSelectionHandler(null);
   }, [editor, registerAIGetSelectionHandler]);
 
+  // Register AI action handler for slash menu AI commands
+  useEffect(() => {
+    registerAIActionHandler((action, _ed) => {
+      setAiInlineAction(action);
+    });
+    return () => registerAIActionHandler(() => {});
+  }, []);
+
+  // Ctrl+Space to open AI inline popup
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.code === 'Space') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (editor && !editor.isDestroyed) {
+          setAiInlineAction((prev) => prev ? null : 'ask');
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [editor]);
+
   const saveStatusLabel = saveStatus === 'saved'
     ? lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Saved'
     : saveStatus === 'saving' ? 'Saving...'
@@ -296,6 +321,15 @@ export default function EditorShell() {
               <EditorToolbar editor={editor} />
             </BubbleMenu>
           )}
+
+          {/* AI Inline Popup */}
+          {editor && aiInlineAction && (
+            <AIInlinePopup
+              editor={editor}
+              initialAction={aiInlineAction}
+              onClose={() => setAiInlineAction(null)}
+            />
+          )}
         </motion.div>
 
         {/* Action Bar */}
@@ -315,18 +349,6 @@ export default function EditorShell() {
               <span className="text-sm font-medium tracking-tight">Save</span>
             </motion.button>
           )}
-
-          {/* AI Assist Button */}
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            onClick={toggleAIPanel}
-            className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span className="text-sm font-medium tracking-tight">AI Assist</span>
-          </motion.button>
         </div>
 
         {/* Stats Footer */}

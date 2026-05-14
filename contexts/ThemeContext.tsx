@@ -81,9 +81,9 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const cycleTheme = useCallback(() => {
-    const next = CYCLE_ORDER[(CYCLE_ORDER.indexOf(theme) + 1) % CYCLE_ORDER.length];
-    setTheme(next);
-  }, [theme, setTheme]);
+    // Toggle directly between light and dark, skipping system
+    setTheme(resolvedTheme === 'dark' ? 'light' : 'dark');
+  }, [resolvedTheme, setTheme]);
 
   // Follow system preference changes when mode = 'system'.
   useEffect(() => {

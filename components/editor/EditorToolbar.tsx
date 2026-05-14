@@ -17,9 +17,13 @@ import {
   Check,
   Highlighter,
   Palette,
+  Sparkles,
+  Languages,
+  Lightbulb,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { Editor } from '@tiptap/react';
+import { triggerAIAction } from '@/lib/ai-trigger';
 
 const textColors = ['#2F3437', '#787774', '#9F6B53', '#7A5E3B', '#4F7A57', '#4D6461', '#5B6EAE', '#8B5CF6'];
 const highlightColors = ['#FFF3BF', '#FFE3E3', '#D3F9D8', '#D0EBFF', '#E5DBFF', '#FFE8CC'];
@@ -168,6 +172,30 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
       </button>
       <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => { setShowHighlightPanel((v) => !v); setShowColorPanel(false); setShowHeadingMenu(false); }} className={buttonClass(false)}>
         <Highlighter className="w-4 h-4" />
+      </button>
+
+      <div className="w-px h-5 bg-border-light mx-1" />
+
+      <button type="button" onMouseDown={keepSelectionOnMouseDown}
+        onClick={() => triggerAIAction('improve', editor)}
+        className="h-8 px-2 rounded-md flex items-center gap-1.5 text-xs font-medium text-[#C1843A] hover:bg-[#C1843A]/10 transition-colors"
+        title="AI Improve">
+        <Sparkles className="w-3.5 h-3.5" />
+        Improve
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown}
+        onClick={() => triggerAIAction('translate', editor)}
+        className="h-8 px-2 rounded-md flex items-center gap-1.5 text-xs font-medium text-[#C1843A] hover:bg-[#C1843A]/10 transition-colors"
+        title="AI Translate">
+        <Languages className="w-3.5 h-3.5" />
+        Translate
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown}
+        onClick={() => triggerAIAction('explain', editor)}
+        className="h-8 px-2 rounded-md flex items-center gap-1.5 text-xs font-medium text-[#C1843A] hover:bg-[#C1843A]/10 transition-colors"
+        title="AI Explain">
+        <Lightbulb className="w-3.5 h-3.5" />
+        Explain
       </button>
 
       {showHeadingMenu && (

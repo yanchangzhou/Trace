@@ -92,12 +92,12 @@ pub fn build_generation_prompt(
         .get_setting("model_name")
         .ok()
         .flatten()
-        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+        .unwrap_or_else(|| "deepseek-chat".to_string());
     let base_url = db
         .get_setting("model_base_url")
         .ok()
         .flatten()
-        .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+        .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
 
     Ok(GenerationPrompt {
         task_type: task_type.to_string(),

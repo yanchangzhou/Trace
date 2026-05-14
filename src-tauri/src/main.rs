@@ -55,6 +55,33 @@ fn get_trace_docs_path() -> PathBuf {
     path
 }
 
+/// Initialize AI provider defaults on first run.
+/// Uses DeepSeek as the default provider. Existing settings are never overwritten.
+fn init_ai_defaults(db: &Database) {
+    // Model provider
+    if db.get_setting("model_provider").ok().flatten().is_none() {
+        let _ = db.save_setting("model_provider", "deepseek");
+    }
+    // Model name
+    if db.get_setting("model_name").ok().flatten().is_none() {
+        let _ = db.save_setting("model_name", "deepseek-chat");
+    }
+    // Base URL
+    if db.get_setting("model_base_url").ok().flatten().is_none() {
+        let _ = db.save_setting("model_base_url", "https://api.deepseek.com/v1/chat/completions");
+    }
+    // API key from environment variable (DEEPSEEK_API_KEY or CODEX_API_KEY)
+    if db.get_setting("openai_api_key").ok().flatten().is_none() {
+        if let Ok(key) = std::env::var("DEEPSEEK_API_KEY") {
+            let _ = db.save_setting("openai_api_key", &key);
+            println!("AI: Loaded DEEPSEEK_API_KEY from environment");
+        } else if let Ok(key) = std::env::var("CODEX_API_KEY") {
+            let _ = db.save_setting("openai_api_key", &key);
+            println!("AI: Loaded CODEX_API_KEY from environment");
+        }
+    }
+}
+
 // ── Existing commands (unchanged) ──
 
 #[tauri::command]
@@ -549,9 +576,9 @@ async fn save_model_settings(provider: String, model_name: String, base_url: Str
 
 #[tauri::command]
 async fn get_model_settings() -> Result<serde_json::Value, String> {
-    let provider = DATABASE.get_setting("model_provider").map_err(|e| e.to_string())?.unwrap_or_default();
-    let model_name = DATABASE.get_setting("model_name").map_err(|e| e.to_string())?.unwrap_or_else(|| "gpt-4o-mini".to_string());
-    let base_url = DATABASE.get_setting("model_base_url").map_err(|e| e.to_string())?.unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+    let provider = DATABASE.get_setting("model_provider").map_err(|e| e.to_string())?.unwrap_or_else(|| "deepseek".to_string());
+    let model_name = DATABASE.get_setting("model_name").map_err(|e| e.to_string())?.unwrap_or_else(|| "deepseek-chat".to_string());
+    let base_url = DATABASE.get_setting("model_base_url").map_err(|e| e.to_string())?.unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
     Ok(serde_json::json!({
         "provider": provider,
         "model_name": model_name,
@@ -577,11 +604,11 @@ async fn analyze_style_with_llm(file_ids: Vec<String>, profile_name: String) -> 
     let base_url = DATABASE
         .get_setting("model_base_url")
         .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| "https://api.openai.com/v1/chat/completions".to_string());
+        .unwrap_or_else(|| "https://api.deepseek.com/v1/chat/completions".to_string());
     let model = DATABASE
         .get_setting("model_name")
         .map_err(|e| e.to_string())?
-        .unwrap_or_else(|| "gpt-4o-mini".to_string());
+        .unwrap_or_else(|| "deepseek-chat".to_string());
 
     let (profile, examples) = style::analyze_style_with_llm(
         &DATABASE, &file_ids, &api_key, &base_url, &model,
@@ -705,6 +732,9 @@ fn main() {
 
             // Initialize DB (already done via Lazy)
             let _db = Arc::clone(&DATABASE);
+
+            // Initialize AI provider defaults (DeepSeek)
+            init_ai_defaults(&DATABASE);
 
             // Initial indexing
             let search_engine = Arc::clone(&SEARCH_ENGINE);
