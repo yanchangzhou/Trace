@@ -6,7 +6,11 @@ import { useState, useRef, useEffect } from 'react';
 import type { Editor } from '@tiptap/react';
 
 interface BlockMenuProps {
+<<<<<<< HEAD
   editor?: Editor | null;
+=======
+  editor: Editor;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 }
 
 export default function BlockMenu({ editor }: BlockMenuProps) {
@@ -15,7 +19,10 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+<<<<<<< HEAD
     if (!editor) return;
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const handler = () => {
       const { from } = editor.state.selection;
       const resolved = editor.state.doc.resolve(from);
@@ -39,7 +46,11 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   }, []);
 
   const deleteBlock = () => {
+<<<<<<< HEAD
     if (!editor || activeBlockPos === null) return;
+=======
+    if (activeBlockPos === null) return;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     editor.chain().focus().deleteRange({ from: activeBlockPos, to: activeBlockPos + node.nodeSize }).run();
@@ -47,7 +58,11 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   };
 
   const duplicateBlock = () => {
+<<<<<<< HEAD
     if (!editor || activeBlockPos === null) return;
+=======
+    if (activeBlockPos === null) return;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     editor.chain().focus().insertContentAt(activeBlockPos + node.nodeSize, node.toJSON()).run();
@@ -55,7 +70,11 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   };
 
   const moveBlockUp = () => {
+<<<<<<< HEAD
     if (!editor || activeBlockPos === null || activeBlockPos <= 1) return;
+=======
+    if (activeBlockPos === null || activeBlockPos <= 1) return;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     const tr = editor.state.tr;
@@ -69,7 +88,11 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   };
 
   const moveBlockDown = () => {
+<<<<<<< HEAD
     if (!editor || activeBlockPos === null) return;
+=======
+    if (activeBlockPos === null) return;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     const tr = editor.state.tr;
@@ -80,7 +103,11 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
     setShowActions(false);
   };
 
+<<<<<<< HEAD
   if (!editor || activeBlockPos === null) return null;
+=======
+  if (activeBlockPos === null) return null;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
   // Position the menu near the active block
   const coords = editor.view.coordsAtPos(activeBlockPos);

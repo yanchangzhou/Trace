@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use crate::db::Database;
 use crate::models::*;
 
+<<<<<<< HEAD
 /// Truncate `s` to at most `max_len` bytes on a valid UTF-8 character boundary.
 fn safe_truncate(s: &str, max_len: usize) -> &str {
     if s.len() <= max_len { return s; }
@@ -13,6 +14,8 @@ fn safe_truncate(s: &str, max_len: usize) -> &str {
     &s[..end]
 }
 
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 /// Build a context prompt from selected files and their chunks.
 pub fn build_ai_context(db: &Database, request: &AIRequest) -> Result<String> {
     let mut context = String::new();
@@ -40,8 +43,16 @@ pub fn build_ai_context(db: &Database, request: &AIRequest) -> Result<String> {
         if !chunks.is_empty() {
             context.push_str(&format!("### Chunks for: {}\n", file_id));
             for chunk in chunks.iter().take(10) {
+<<<<<<< HEAD
                 let snippet = safe_truncate(&chunk.text, 500);
                 context.push_str(&format!("{}\n---\n", snippet));
+=======
+                if chunk.text.len() > 500 {
+                    context.push_str(&format!("{}\n---\n", &chunk.text[..500]));
+                } else {
+                    context.push_str(&format!("{}\n---\n", chunk.text));
+                }
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
             }
             context.push('\n');
         }

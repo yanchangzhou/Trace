@@ -162,7 +162,11 @@ async fn copy_file_to_book(file_path: String, book_id: String) -> Result<String,
     dest_path.push(&file_name);
 
     let mut counter = 1;
+<<<<<<< HEAD
     let stem = source.file_stem().ok_or("Invalid file path: no file stem")?.to_string_lossy().to_string();
+=======
+    let stem = source.file_stem().unwrap().to_string_lossy().to_string();
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     let extension = source.extension().map(|e| e.to_string_lossy().to_string());
     while dest_path.exists() {
         let new_name = if let Some(ext) = &extension {
@@ -188,11 +192,16 @@ async fn copy_file_to_book(file_path: String, book_id: String) -> Result<String,
             let name = dest_path_clone.file_name().and_then(|n| n.to_str()).unwrap_or("").to_string();
             let ext = dest_path_clone.extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
             let path_str = dest_path_clone.to_string_lossy().to_string();
+<<<<<<< HEAD
             let metadata = match std::fs::metadata(&dest_path_clone) {
                 Ok(m) => m,
                 Err(e) => { eprintln!("Failed to read metadata: {}", e); return; }
             };
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+=======
+            let metadata = std::fs::metadata(&dest_path_clone).unwrap();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
             let _ = db.add_file(&FileRecord {
                 id: file_id.clone(), book_id: book_id.clone(), name: name.clone(),
@@ -289,7 +298,11 @@ async fn sync_library() -> Result<usize, String> {
                 let ext = entry.path().extension().and_then(|e| e.to_str()).unwrap_or("").to_lowercase();
                 let path_str = entry.path().to_string_lossy().to_string();
                 let metadata = std::fs::metadata(entry.path()).ok();
+<<<<<<< HEAD
                 let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs() as i64).unwrap_or(0);
+=======
+                let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
                 let _ = DATABASE.add_file(&FileRecord {
                     id: file_id.clone(), book_id: String::new(), name: name.clone(),

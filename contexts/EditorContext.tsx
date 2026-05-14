@@ -1,5 +1,6 @@
 'use client';
 
+<<<<<<< HEAD
 import { createContext, useContext, useState, useCallback, useRef, ReactNode } from 'react';
 import type { AIInlineAction } from '@/types';
 
@@ -13,6 +14,12 @@ interface AIInlineState {
   position: { x: number; y: number };
 }
 
+=======
+import { createContext, useContext, useState, useCallback, useRef, useEffect, ReactNode } from 'react';
+
+type SaveStatus = 'saved' | 'saving' | 'unsaved' | 'error';
+
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 interface EditorContextType {
   noteTitle: string;
   setNoteTitle: (title: string) => void;
@@ -24,6 +31,7 @@ interface EditorContextType {
   toggleAIPanel: () => void;
   setAIPanelOpen: (open: boolean) => void;
   insertReferenceBlock: (quote: string, source: string) => void;
+<<<<<<< HEAD
   registerInsertHandler: (handler: ((quote: string, source: string) => void) | null) => void;
   lastSavedAt: number | null;
   markSaved: () => void;
@@ -35,6 +43,12 @@ interface EditorContextType {
   replaceSelection: (text: string) => void;
   registerInsertGeneratedText: (handler: ((text: string) => void) | null) => void;
   registerReplaceSelection: (handler: ((text: string) => void) | null) => void;
+=======
+  /** The callback is set by the editor; the preview panel calls it via context. */
+  registerInsertHandler: (handler: ((quote: string, source: string) => void) | null) => void;
+  lastSavedAt: number | null;
+  markSaved: () => void;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 }
 
 const EditorContext = createContext<EditorContextType | undefined>(undefined);
@@ -46,10 +60,13 @@ export function EditorProvider({ children }: { children: ReactNode }) {
   const [isAIPanelOpen, setAIPanelOpen] = useState(false);
   const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
   const insertHandlerRef = useRef<((quote: string, source: string) => void) | null>(null);
+<<<<<<< HEAD
   const insertGeneratedTextRef = useRef<((text: string) => void) | null>(null);
   const replaceSelectionRef = useRef<((text: string) => void) | null>(null);
 
   const [aiInlineState, setAIInlineState] = useState<AIInlineState | null>(null);
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
   const toggleAIPanel = useCallback(() => setAIPanelOpen((v) => !v), []);
 
@@ -61,6 +78,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     insertHandlerRef.current?.(quote, source);
   }, []);
 
+<<<<<<< HEAD
   const registerInsertGeneratedText = useCallback((handler: ((text: string) => void) | null) => {
     insertGeneratedTextRef.current = handler;
   }, []);
@@ -85,6 +103,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
     setAIInlineState(null);
   }, []);
 
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   const markSaved = useCallback(() => {
     setSaveStatus('saved');
     setLastSavedAt(Date.now());
@@ -106,6 +126,7 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         registerInsertHandler,
         lastSavedAt,
         markSaved,
+<<<<<<< HEAD
         aiInlineState,
         openAIInline,
         closeAIInline,
@@ -113,6 +134,8 @@ export function EditorProvider({ children }: { children: ReactNode }) {
         replaceSelection,
         registerInsertGeneratedText,
         registerReplaceSelection,
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
       }}
     >
       {children}

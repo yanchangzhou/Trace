@@ -10,12 +10,16 @@ import {
   Quote,
   Minus,
   Sparkles,
+<<<<<<< HEAD
   FileText,
   ListTodo,
   MessageSquare,
   Languages,
 } from 'lucide-react';
 import { triggerAIInline } from '@/lib/ai-bridge';
+=======
+} from 'lucide-react';
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
 export interface CommandItem {
   key: string;
@@ -92,6 +96,7 @@ export const commands: CommandItem[] = [
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
   {
+<<<<<<< HEAD
     key: 'ai-continue',
     label: 'Continue Writing',
     description: 'AI continues from your cursor position',
@@ -204,6 +209,14 @@ export const commands: CommandItem[] = [
         position: { x: coords.left, y: coords.bottom },
       });
     },
+=======
+    key: 'ai-write',
+    label: 'AI Write',
+    description: 'Generate content with AI',
+    icon: Sparkles,
+    category: 'ai',
+    action: () => {},
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   },
 ];
 

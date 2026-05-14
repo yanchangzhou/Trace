@@ -480,6 +480,7 @@ impl SearchEngine {
                     let end = (pos + 240).min(content.len());
                     let mut snippet_str = String::new();
                     if start > 0 { snippet_str.push_str("..."); }
+<<<<<<< HEAD
                     let safe_start = if content.is_char_boundary(start) { start } else { pos };
                     let safe_end = {
                         let e = if content.is_char_boundary(end) { end } else { pos + 280 };
@@ -491,6 +492,13 @@ impl SearchEngine {
                         e
                     };
                     snippet_str.push_str(&content[safe_start..safe_end]);
+=======
+                    if content.is_char_boundary(start) && content.is_char_boundary(end) {
+                        snippet_str.push_str(&content[start..end]);
+                    } else {
+                        snippet_str.push_str(&content[pos..end.min(pos + 280)]);
+                    }
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
                     if end < content.len() { snippet_str.push_str("..."); }
                     snippet_str
                 } else {

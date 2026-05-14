@@ -11,8 +11,11 @@ export type {
   StyleConstraint,
   AIRequest,
   AIStreamEvent,
+<<<<<<< HEAD
   AIInlineAction,
   AIInlineRequest,
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 } from './ai';
 
 // Legacy types kept for backward compatibility

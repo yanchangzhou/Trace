@@ -7,7 +7,11 @@ import type { Editor } from '@tiptap/react';
 import type { CommandItem } from './commands';
 
 interface CommandListProps {
+<<<<<<< HEAD
   editor?: Editor | null;
+=======
+  editor: Editor;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   items: CommandItem[];
   command: (item: CommandItem) => void;
   clientRect?: (() => DOMRect | null) | null;

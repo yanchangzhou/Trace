@@ -25,7 +25,11 @@ const textColors = ['#2F3437', '#787774', '#9F6B53', '#7A5E3B', '#4F7A57', '#4D6
 const highlightColors = ['#FFF3BF', '#FFE3E3', '#D3F9D8', '#D0EBFF', '#E5DBFF', '#FFE8CC'];
 
 interface EditorToolbarProps {
+<<<<<<< HEAD
   editor?: Editor | null;
+=======
+  editor: Editor;
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 }
 
 export default function EditorToolbar({ editor }: EditorToolbarProps) {
@@ -44,7 +48,10 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
   };
 
   const setBlockType = (type: 'paragraph' | 'h1' | 'h2' | 'h3' | 'bullet' | 'ordered' | 'codeBlock') => {
+<<<<<<< HEAD
     if (!editor) return;
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const chain = editor.chain().focus();
     switch (type) {
       case 'paragraph': chain.clearNodes().setParagraph().run(); break;
@@ -59,7 +66,10 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
   };
 
   const applyLink = () => {
+<<<<<<< HEAD
     if (!editor) return;
+=======
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const previous = editor.getAttributes('link').href as string | undefined;
     const url = window.prompt('Link URL (https://...)', previous || 'https://');
     if (url === null) return;
@@ -70,6 +80,7 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
     editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
   };
 
+<<<<<<< HEAD
   const turnIntoLabel = editor?.isActive('bulletList')
     ? 'Bulleted list'
     : editor?.isActive('orderedList')
@@ -81,6 +92,19 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
           : editor?.isActive('heading', { level: 2 })
             ? 'H2'
             : editor?.isActive('heading', { level: 3 })
+=======
+  const turnIntoLabel = editor.isActive('bulletList')
+    ? 'Bulleted list'
+    : editor.isActive('orderedList')
+      ? 'Numbered list'
+      : editor.isActive('codeBlock')
+        ? 'Code block'
+        : editor.isActive('heading', { level: 1 })
+          ? 'H1'
+          : editor.isActive('heading', { level: 2 })
+            ? 'H2'
+            : editor.isActive('heading', { level: 3 })
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
               ? 'H3'
               : 'Text';
 
@@ -121,6 +145,7 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
       transition={{ duration: 0.14 }}
       className="relative z-[200] flex items-center gap-1 p-1.5 rounded-lg border border-border-light/60 bg-[#FBFBFB] shadow-[0_10px_28px_rgba(15,23,42,0.16)]"
     >
+<<<<<<< HEAD
       <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor?.chain().focus().toggleBold().run()} className={buttonClass(editor?.isActive('bold'))}>
         <Bold className="w-4 h-4" />
       </button>
@@ -131,6 +156,18 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
         <UnderlineIcon className="w-4 h-4" />
       </button>
       <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor?.chain().focus().toggleStrike().run()} className={buttonClass(editor?.isActive('strike'))}>
+=======
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleBold().run()} className={buttonClass(editor.isActive('bold'))}>
+        <Bold className="w-4 h-4" />
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleItalic().run()} className={buttonClass(editor.isActive('italic'))}>
+        <Italic className="w-4 h-4" />
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleUnderline().run()} className={buttonClass(editor.isActive('underline'))}>
+        <UnderlineIcon className="w-4 h-4" />
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleStrike().run()} className={buttonClass(editor.isActive('strike'))}>
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
         <Strikethrough className="w-4 h-4" />
       </button>
 
@@ -148,6 +185,7 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
 
       <div className="w-px h-5 bg-border-light mx-1" />
 
+<<<<<<< HEAD
       <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor?.chain().focus().toggleBulletList().run()} className={buttonClass(editor?.isActive('bulletList'))}>
         <List className="w-4 h-4" />
       </button>
@@ -158,6 +196,18 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
         <Code2 className="w-4 h-4" />
       </button>
       <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={applyLink} className={buttonClass(editor?.isActive('link'))}>
+=======
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleBulletList().run()} className={buttonClass(editor.isActive('bulletList'))}>
+        <List className="w-4 h-4" />
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleOrderedList().run()} className={buttonClass(editor.isActive('orderedList'))}>
+        <ListOrdered className="w-4 h-4" />
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => editor.chain().focus().toggleCode().run()} className={buttonClass(editor.isActive('code'))}>
+        <Code2 className="w-4 h-4" />
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={applyLink} className={buttonClass(editor.isActive('link'))}>
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
         <Link2 className="w-4 h-4" />
       </button>
 
@@ -175,6 +225,7 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
           <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-text-tertiary-light">Turn into</div>
           {(['paragraph', 'h1', 'h2', 'h3', 'bullet', 'ordered', 'codeBlock'] as const).map((type) => {
             const isActive =
+<<<<<<< HEAD
               type === 'paragraph' ? editor?.isActive('paragraph') && !editor?.isActive('heading') :
               type === 'h1' ? editor?.isActive('heading', { level: 1 }) :
               type === 'h2' ? editor?.isActive('heading', { level: 2 }) :
@@ -182,6 +233,15 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
               type === 'bullet' ? editor?.isActive('bulletList') :
               type === 'ordered' ? editor?.isActive('orderedList') :
               editor?.isActive('codeBlock');
+=======
+              type === 'paragraph' ? editor.isActive('paragraph') && !editor.isActive('heading') :
+              type === 'h1' ? editor.isActive('heading', { level: 1 }) :
+              type === 'h2' ? editor.isActive('heading', { level: 2 }) :
+              type === 'h3' ? editor.isActive('heading', { level: 3 }) :
+              type === 'bullet' ? editor.isActive('bulletList') :
+              type === 'ordered' ? editor.isActive('orderedList') :
+              editor.isActive('codeBlock');
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
             const Icon =
               type === 'h1' ? Heading1 : type === 'h2' ? Heading2 : type === 'h3' ? Heading3 :
               type === 'bullet' ? List : type === 'ordered' ? ListOrdered : type === 'codeBlock' ? Code2 : null;
@@ -207,11 +267,19 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
         <div className="absolute left-0 top-full mt-2 p-2 bg-white rounded-lg border border-border-light shadow-md flex items-center gap-1">
           {textColors.map((color) => (
             <button key={color} type="button" onMouseDown={keepSelectionOnMouseDown}
+<<<<<<< HEAD
               onClick={() => { editor?.chain().focus().setColor(color).run(); setShowColorPanel(false); }}
               className="w-5 h-5 rounded-full border border-black/10" style={{ backgroundColor: color }} />
           ))}
           <button type="button" onMouseDown={keepSelectionOnMouseDown}
             onClick={() => { editor?.chain().focus().unsetColor().run(); setShowColorPanel(false); }}
+=======
+              onClick={() => { editor.chain().focus().setColor(color).run(); setShowColorPanel(false); }}
+              className="w-5 h-5 rounded-full border border-black/10" style={{ backgroundColor: color }} />
+          ))}
+          <button type="button" onMouseDown={keepSelectionOnMouseDown}
+            onClick={() => { editor.chain().focus().unsetColor().run(); setShowColorPanel(false); }}
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
             className="ml-1 px-1.5 py-0.5 text-[10px] rounded border border-border-light hover:bg-black/5">Clear</button>
         </div>
       )}
@@ -220,11 +288,19 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
         <div className="absolute left-10 top-full mt-2 p-2 bg-white rounded-lg border border-border-light shadow-md flex items-center gap-1">
           {highlightColors.map((color) => (
             <button key={color} type="button" onMouseDown={keepSelectionOnMouseDown}
+<<<<<<< HEAD
               onClick={() => { editor?.chain().focus().setHighlight({ color }).run(); setShowHighlightPanel(false); }}
               className="w-5 h-5 rounded-full border border-black/10" style={{ backgroundColor: color }} />
           ))}
           <button type="button" onMouseDown={keepSelectionOnMouseDown}
             onClick={() => { editor?.chain().focus().unsetHighlight().run(); setShowHighlightPanel(false); }}
+=======
+              onClick={() => { editor.chain().focus().setHighlight({ color }).run(); setShowHighlightPanel(false); }}
+              className="w-5 h-5 rounded-full border border-black/10" style={{ backgroundColor: color }} />
+          ))}
+          <button type="button" onMouseDown={keepSelectionOnMouseDown}
+            onClick={() => { editor.chain().focus().unsetHighlight().run(); setShowHighlightPanel(false); }}
+>>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
             className="ml-1 px-1.5 py-0.5 text-[10px] rounded border border-border-light hover:bg-black/5">Clear</button>
         </div>
       )}
