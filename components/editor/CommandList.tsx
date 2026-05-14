@@ -58,6 +58,18 @@ export default function CommandList({
     setPosition({ top, left });
   }, [clientRect, items]);
 
+  const PAGE_SIZE = 6;
+
+  // Scroll the selected item into view when index changes
+  useEffect(() => {
+    if (!menuRef.current) return;
+    const buttons = menuRef.current.querySelectorAll('button');
+    const selected = buttons[selectedIndex];
+    if (selected) {
+      selected.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+    }
+  }, [selectedIndex]);
+
   // Keyboard navigation via capture-phase document listener
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -71,6 +83,16 @@ export default function CommandList({
         e.preventDefault();
         e.stopPropagation();
         setSelectedIndex((prev) => Math.max(prev - 1, 0));
+      } else if (e.key === 'PageDown') {
+        e.preventDefault();
+        e.stopPropagation();
+        setSelectedIndex((prev) =>
+          Math.min(prev + PAGE_SIZE, Math.max(0, items.length - 1)),
+        );
+      } else if (e.key === 'PageUp') {
+        e.preventDefault();
+        e.stopPropagation();
+        setSelectedIndex((prev) => Math.max(prev - PAGE_SIZE, 0));
       } else if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
