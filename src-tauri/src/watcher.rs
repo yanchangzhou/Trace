@@ -91,6 +91,9 @@ fn handle_file_event(event: &Event, search_engine: &SearchEngine, db: &Database)
                             size: metadata.len(),
                             hash: None,
                             status: "ready".to_string(),
+                            role: "source".to_string(),
+                            parse_status: "ready".to_string(),
+                            parse_error: None,
                             created_at: now,
                             updated_at: now,
                         });

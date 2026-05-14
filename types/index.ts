@@ -8,6 +8,7 @@ export type {
   AISource,
   WritingStyle,
   StyleProfile,
+  SavedStyleProfile,
   StyleConstraint,
   AIRequest,
   AIStreamEvent,

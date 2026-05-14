@@ -24,15 +24,17 @@ tokio = { version = "1", features = ["full"] }
 anyhow = "1.0"
 once_cell = "1.19"
 dirs = "5.0"
-# Document parsing dependencies (PDF preview uses frontend pdf.js; no pdf-extract)
+# Document parsing dependencies (PDF preview still uses frontend pdf.js)
 docx-rs = "0.4"
 zip = "0.6"
 xml-rs = "0.8"
+pdf-extract = "0.10.0"
 # Database (SQLite via rusqlite with bundled sqlite3)
 rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 # HTTP client for AI API calls
 reqwest = { version = "0.12", features = ["json", "stream"] }
+futures-util = "0.3"
 
 [features]
 default = ["custom-protocol"]

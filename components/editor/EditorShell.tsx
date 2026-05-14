@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { Sparkles, Save } from 'lucide-react';
+import { Save } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useEditor, EditorContent } from '@tiptap/react';
 import { BubbleMenu } from '@tiptap/react/menus';
@@ -11,13 +11,14 @@ import Link from '@tiptap/extension-link';
 import { TextStyle } from '@tiptap/extension-text-style';
 import Color from '@tiptap/extension-color';
 import Highlight from '@tiptap/extension-highlight';
-import BubbleMenuExtension from '@tiptap/extension-bubble-menu';
 import Placeholder from '@tiptap/extension-placeholder';
 import { useSidebar } from '@/contexts/SidebarContext';
 import { useFilePreview } from '@/contexts/FilePreviewContext';
 import { useEditorContext } from '@/contexts/EditorContext';
 import { useBook } from '@/contexts/BookContext';
-import { createNote, updateNote } from '@/lib/tauri';
+import { createNote, updateNote, isTauriEnvironment } from '@/lib/tauri';
+import { registerAIActionHandler, type AIActionType } from '@/lib/ai-trigger';
+import AIInlinePopup from '@/components/ai/AIInlinePopup';
 import EditorToolbar from './EditorToolbar';
 import { SlashCommand } from './suggestion';
 import { BlockDragExtension } from './BlockDragExtension';
@@ -39,44 +40,46 @@ export default function EditorShell() {
     setNoteId,
     saveStatus,
     setSaveStatus,
-    toggleAIPanel,
     registerInsertHandler,
+    registerAIInsertHandler,
+    registerAIReplaceHandler,
+    registerAIGetSelectionHandler,
     lastSavedAt,
     markSaved,
+    pendingNoteLoad,
+    clearPendingNoteLoad,
   } = useEditorContext();
 
   const [plainText, setPlainText] = useState('');
+  const [aiInlineAction, setAiInlineAction] = useState<AIActionType | null>(null);
   const titleInputRef = useRef<HTMLInputElement>(null);
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Track the last persisted note ID so title-change autosave only fires
+  // after the note exists in the DB.
+  const savedNoteIdRef = useRef<string | null>(null);
+
+  const extensions = useMemo(() => [
+    StarterKit,
+    Underline,
+    TextStyle,
+    Color,
+    Highlight.configure({ multicolor: true }),
+    Link.configure({
+      openOnClick: false,
+      autolink: true,
+      defaultProtocol: 'https',
+    }),
+    Placeholder.configure({
+      placeholder: 'Start writing your thoughts...',
+    }),
+    BlockDragExtension.configure({
+      dragHandleSelector: '.block-drag-handle',
+    }),
+    SlashCommand,
+  ], []);
 
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: [
-      StarterKit,
-      Underline,
-      TextStyle,
-      Color,
-      Highlight.configure({ multicolor: true }),
-      Link.configure({
-        openOnClick: false,
-        autolink: true,
-        defaultProtocol: 'https',
-      }),
-      BubbleMenuExtension.configure({
-        shouldShow: ({ editor: e, state }) => {
-          const { from, to, empty } = state.selection;
-          const hasText = e.state.doc.textBetween(from, to, ' ').trim().length > 0;
-          return e.isFocused && !empty && hasText;
-        },
-      }),
-      Placeholder.configure({
-        placeholder: 'Start writing your thoughts...',
-      }),
-      BlockDragExtension.configure({
-        dragHandleSelector: '.block-drag-handle',
-      }),
-      SlashCommand,
-    ],
+    extensions,
     content: '<p></p>',
     editorProps: {
       attributes: {
@@ -94,20 +97,30 @@ export default function EditorShell() {
   const wordCount = useMemo(() => plainText.split(/\s+/).filter(Boolean).length, [plainText]);
   const charCount = plainText.length;
 
-  // Auto-save: debounce save after content changes
+  // Auto-save: debounce save after content or title changes.
   const doSave = useCallback(async () => {
+    // Browser mode: no Tauri backend, silently mark as saved to prevent error state.
+    if (!isTauriEnvironment()) {
+      markSaved();
+      return;
+    }
     if (!editor) return;
     const contentJson = JSON.stringify(editor.getJSON());
     const text = editor.getText();
-    if (!text.trim() && !noteId) return; // Don't save empty new notes
+    // Read from refs so the closure always sees the latest values.
+    const currentNoteId = noteId;
+    const currentTitle = noteTitle;
+    if (!text.trim() && !currentNoteId) return;
 
     setSaveStatus('saving');
     try {
-      if (noteId) {
-        await updateNote(noteId, noteTitle, contentJson, text);
+      if (currentNoteId) {
+        await updateNote(currentNoteId, currentTitle, contentJson, text);
+        savedNoteIdRef.current = currentNoteId;
       } else if (currentBook) {
-        const note = await createNote(currentBook.id, noteTitle, contentJson, text);
+        const note = await createNote(currentBook.id, currentTitle, contentJson, text);
         setNoteId(note.id);
+        savedNoteIdRef.current = note.id;
       }
       markSaved();
     } catch (error) {
@@ -116,28 +129,40 @@ export default function EditorShell() {
     }
   }, [editor, noteId, noteTitle, currentBook, setNoteId, setSaveStatus, markSaved]);
 
+  // Trigger autosave whenever content becomes "unsaved".
   useEffect(() => {
     if (saveStatus !== 'unsaved') return;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      doSave();
-    }, 1500);
-    return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    };
+    const timer = setTimeout(() => void doSave(), 1500);
+    return () => clearTimeout(timer);
   }, [saveStatus, doSave]);
 
-  // Save on title change
+  // Trigger autosave on title change — but only after the note already exists in the DB.
   useEffect(() => {
-    if (!noteId) return;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      doSave();
-    }, 1500);
-    return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    };
-  }, [noteTitle]);
+    if (!savedNoteIdRef.current) return;
+    const timer = setTimeout(() => void doSave(), 1500);
+    return () => clearTimeout(timer);
+  }, [noteTitle, doSave]);
+
+  // Load a note when EditorContext signals one (e.g. user clicked a note in the list).
+  useEffect(() => {
+    if (!pendingNoteLoad || !editor) return;
+
+    const { id, title, contentJson } = pendingNoteLoad;
+
+    setNoteId(id || null);
+    savedNoteIdRef.current = id || null;
+    setNoteTitle(title);
+
+    try {
+      const content = contentJson ? JSON.parse(contentJson) : null;
+      editor.commands.setContent(content ?? '<p></p>');
+    } catch {
+      editor.commands.setContent('<p></p>');
+    }
+
+    setSaveStatus('saved');
+    clearPendingNoteLoad();
+  }, [pendingNoteLoad, editor, setNoteId, setNoteTitle, setSaveStatus, clearPendingNoteLoad]);
 
   // Register insert reference handler for preview panel
   useEffect(() => {
@@ -163,6 +188,57 @@ export default function EditorShell() {
     });
     return () => registerInsertHandler(null);
   }, [editor, registerInsertHandler]);
+
+  // Register AI insert handler — inserts generated text at cursor
+  useEffect(() => {
+    if (!editor) return;
+    registerAIInsertHandler((text: string) => {
+      editor.chain().focus().insertContent(text).run();
+    });
+    return () => registerAIInsertHandler(null);
+  }, [editor, registerAIInsertHandler]);
+
+  // Register AI replace handler — replaces selected text
+  useEffect(() => {
+    if (!editor) return;
+    registerAIReplaceHandler((text: string) => {
+      editor.chain().focus().deleteSelection().insertContent(text).run();
+    });
+    return () => registerAIReplaceHandler(null);
+  }, [editor, registerAIReplaceHandler]);
+
+  // Register AI get selection handler
+  useEffect(() => {
+    registerAIGetSelectionHandler(() => {
+      if (!editor) return '';
+      const { from, to } = editor.state.selection;
+      return editor.state.doc.textBetween(from, to, ' ');
+    });
+    return () => registerAIGetSelectionHandler(null);
+  }, [editor, registerAIGetSelectionHandler]);
+
+  // Register AI action handler for slash menu AI commands
+  useEffect(() => {
+    registerAIActionHandler((action, _ed) => {
+      setAiInlineAction(action);
+    });
+    return () => registerAIActionHandler(() => {});
+  }, []);
+
+  // Ctrl+Space to open AI inline popup
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.ctrlKey && e.code === 'Space') {
+        e.preventDefault();
+        e.stopPropagation();
+        if (editor && !editor.isDestroyed) {
+          setAiInlineAction((prev) => prev ? null : 'ask');
+        }
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [editor]);
 
   const saveStatusLabel = saveStatus === 'saved'
     ? lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Saved'
@@ -204,18 +280,6 @@ export default function EditorShell() {
             />
           </div>
 
-          {/* Bubble Menu Toolbar */}
-          {editor && (
-            <BubbleMenu
-              editor={editor}
-              options={{ placement: 'top' }}
-              updateDelay={80}
-              appendTo={() => document.body}
-            >
-              <EditorToolbar editor={editor} />
-            </BubbleMenu>
-          )}
-
           {/* Editor Content */}
           <EditorContent
             editor={editor}
@@ -240,6 +304,32 @@ export default function EditorShell() {
               [&_.ProseMirror_hr]:my-8 [&_.ProseMirror_hr]:border-border-light [&_.ProseMirror_hr]:dark:border-border-dark
             "
           />
+
+          {/* Bubble Menu Toolbar */}
+          {editor && (
+            <BubbleMenu
+              editor={editor}
+              options={{ placement: 'top' }}
+              shouldShow={({ editor: e, state }) => {
+                if (!e?.isEditable || !e.isFocused || !state?.selection) return false;
+                const { from, to, empty } = state.selection;
+                return !empty && e.state.doc.textBetween(from, to, ' ').trim().length > 0;
+              }}
+              updateDelay={80}
+              appendTo={() => document.body}
+            >
+              <EditorToolbar editor={editor} />
+            </BubbleMenu>
+          )}
+
+          {/* AI Inline Popup */}
+          {editor && aiInlineAction && (
+            <AIInlinePopup
+              editor={editor}
+              initialAction={aiInlineAction}
+              onClose={() => setAiInlineAction(null)}
+            />
+          )}
         </motion.div>
 
         {/* Action Bar */}
@@ -259,18 +349,6 @@ export default function EditorShell() {
               <span className="text-sm font-medium tracking-tight">Save</span>
             </motion.button>
           )}
-
-          {/* AI Assist Button */}
-          <motion.button
-            whileHover={{ scale: 1.05 }}
-            whileTap={{ scale: 0.95 }}
-            transition={{ type: 'spring', stiffness: 300, damping: 20 }}
-            onClick={toggleAIPanel}
-            className="flex items-center gap-2 bg-gradient-to-r from-accent-warm to-accent-cool text-white px-6 py-2 rounded-squircle shadow-ambient-lg dark:shadow-ambient-lg-dark"
-          >
-            <Sparkles className="w-4 h-4" />
-            <span className="text-sm font-medium tracking-tight">AI Assist</span>
-          </motion.button>
         </div>
 
         {/* Stats Footer */}

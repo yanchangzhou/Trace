@@ -122,11 +122,27 @@ body.no-transitions * {
 :root {
   --background: #F7F5F2;
   --foreground: #1A1A1A;
+  color-scheme: light;
 }
 
 .dark {
   --background: #121212;
   --foreground: #F5F5F5;
+  color-scheme: dark;
+}
+
+/* Only apply cross-element color transitions during an explicit theme switch.
+   This keeps hover/focus animations snappy at all other times. */
+[data-theme-transitioning],
+[data-theme-transitioning] *,
+[data-theme-transitioning] *::before,
+[data-theme-transitioning] *::after {
+  transition:
+    background-color 200ms ease,
+    border-color 200ms ease,
+    color 160ms ease,
+    fill 160ms ease,
+    stroke 160ms ease !important;
 }
 
 body {

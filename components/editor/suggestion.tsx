@@ -49,15 +49,13 @@ export const SlashCommand = Extension.create({
   addProseMirrorPlugins() {
     return [
       Suggestion<CommandItem, CommandItem>({
-        editor: undefined as any,
+        editor: this.editor,
         char: '/',
         allowedPrefixes: [' '],
         startOfLine: true,
         command({ editor, range, props }) {
           editor.chain().focus().deleteRange(range).run();
-          if (props.category === 'block') {
-            props.action(editor);
-          }
+          props.action(editor);
         },
         items({ query }) {
           return filterCommands(query);

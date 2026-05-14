@@ -17,15 +17,19 @@ import {
   Check,
   Highlighter,
   Palette,
+  Sparkles,
+  Languages,
+  Lightbulb,
 } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
 import type { Editor } from '@tiptap/react';
+import { triggerAIAction } from '@/lib/ai-trigger';
 
 const textColors = ['#2F3437', '#787774', '#9F6B53', '#7A5E3B', '#4F7A57', '#4D6461', '#5B6EAE', '#8B5CF6'];
 const highlightColors = ['#FFF3BF', '#FFE3E3', '#D3F9D8', '#D0EBFF', '#E5DBFF', '#FFE8CC'];
 
 interface EditorToolbarProps {
-  editor: Editor;
+  editor: Editor | null;
 }
 
 export default function EditorToolbar({ editor }: EditorToolbarProps) {
@@ -33,6 +37,35 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
   const [showHighlightPanel, setShowHighlightPanel] = useState(false);
   const [showHeadingMenu, setShowHeadingMenu] = useState(false);
   const bubbleRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!editor) return;
+    const close = () => {
+      setShowColorPanel(false);
+      setShowHighlightPanel(false);
+      setShowHeadingMenu(false);
+    };
+    editor.on('selectionUpdate', close);
+    editor.on('blur', close);
+    return () => {
+      editor.off('selectionUpdate', close);
+      editor.off('blur', close);
+    };
+  }, [editor]);
+
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => {
+      if (!bubbleRef.current) return;
+      if (bubbleRef.current.contains(e.target as Node)) return;
+      setShowColorPanel(false);
+      setShowHighlightPanel(false);
+      setShowHeadingMenu(false);
+    };
+    document.addEventListener('mousedown', onDown);
+    return () => document.removeEventListener('mousedown', onDown);
+  }, []);
+
+  if (!editor) return null;
 
   const buttonClass = (active = false) =>
     `w-8 h-8 rounded-md flex items-center justify-center transition-colors ${
@@ -81,33 +114,6 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
             : editor.isActive('heading', { level: 3 })
               ? 'H3'
               : 'Text';
-
-  useEffect(() => {
-    if (!editor) return;
-    const close = () => {
-      setShowColorPanel(false);
-      setShowHighlightPanel(false);
-      setShowHeadingMenu(false);
-    };
-    editor.on('selectionUpdate', close);
-    editor.on('blur', close);
-    return () => {
-      editor.off('selectionUpdate', close);
-      editor.off('blur', close);
-    };
-  }, [editor]);
-
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => {
-      if (!bubbleRef.current) return;
-      if (bubbleRef.current.contains(e.target as Node)) return;
-      setShowColorPanel(false);
-      setShowHighlightPanel(false);
-      setShowHeadingMenu(false);
-    };
-    document.addEventListener('mousedown', onDown);
-    return () => document.removeEventListener('mousedown', onDown);
-  }, []);
 
   return (
     <motion.div
@@ -166,6 +172,30 @@ export default function EditorToolbar({ editor }: EditorToolbarProps) {
       </button>
       <button type="button" onMouseDown={keepSelectionOnMouseDown} onClick={() => { setShowHighlightPanel((v) => !v); setShowColorPanel(false); setShowHeadingMenu(false); }} className={buttonClass(false)}>
         <Highlighter className="w-4 h-4" />
+      </button>
+
+      <div className="w-px h-5 bg-border-light mx-1" />
+
+      <button type="button" onMouseDown={keepSelectionOnMouseDown}
+        onClick={() => triggerAIAction('improve', editor)}
+        className="h-8 px-2 rounded-md flex items-center gap-1.5 text-xs font-medium text-[#C1843A] hover:bg-[#C1843A]/10 transition-colors"
+        title="AI Improve">
+        <Sparkles className="w-3.5 h-3.5" />
+        Improve
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown}
+        onClick={() => triggerAIAction('translate', editor)}
+        className="h-8 px-2 rounded-md flex items-center gap-1.5 text-xs font-medium text-[#C1843A] hover:bg-[#C1843A]/10 transition-colors"
+        title="AI Translate">
+        <Languages className="w-3.5 h-3.5" />
+        Translate
+      </button>
+      <button type="button" onMouseDown={keepSelectionOnMouseDown}
+        onClick={() => triggerAIAction('explain', editor)}
+        className="h-8 px-2 rounded-md flex items-center gap-1.5 text-xs font-medium text-[#C1843A] hover:bg-[#C1843A]/10 transition-colors"
+        title="AI Explain">
+        <Lightbulb className="w-3.5 h-3.5" />
+        Explain
       </button>
 
       {showHeadingMenu && (

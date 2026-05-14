@@ -1,14 +1,16 @@
 'use client';
 
 import { motion, AnimatePresence } from 'framer-motion';
-import { Quote, FileText } from 'lucide-react';
-import type { AIMessage, AIStreamEvent } from '@/types';
+import { Quote, FileText, FilePlus, Replace } from 'lucide-react';
+import type { AIMessage } from '@/types';
 
 interface StreamingComposerProps {
   messages: AIMessage[];
   isStreaming: boolean;
   streamBuffer: string;
   onRetry?: () => void;
+  onInsert?: (text: string) => void;
+  onReplace?: (text: string) => void;
 }
 
 export default function StreamingComposer({
@@ -16,6 +18,8 @@ export default function StreamingComposer({
   isStreaming,
   streamBuffer,
   onRetry,
+  onInsert,
+  onReplace,
 }: StreamingComposerProps) {
   return (
     <div className="flex-1 overflow-y-auto space-y-4 p-4">
@@ -71,13 +75,37 @@ export default function StreamingComposer({
                 </div>
               )}
 
-              {message.role === 'assistant' && onRetry && (
-                <button
-                  onClick={onRetry}
-                  className="mt-2 text-xs text-accent-warm hover:text-accent-warm/80 transition-colors"
-                >
-                  Retry
-                </button>
+              {message.role === 'assistant' && (
+                <div className="mt-2 pt-2 border-t border-border-light dark:border-border-dark flex items-center gap-2">
+                  {onInsert && (
+                    <button
+                      onClick={() => onInsert(message.content)}
+                      className="flex items-center gap-1 text-xs text-accent-warm hover:text-accent-warm/80 transition-colors"
+                      title="Insert into editor at cursor"
+                    >
+                      <FilePlus className="w-3 h-3" />
+                      Insert
+                    </button>
+                  )}
+                  {onReplace && (
+                    <button
+                      onClick={() => onReplace(message.content)}
+                      className="flex items-center gap-1 text-xs text-accent-cool hover:text-accent-cool/80 transition-colors"
+                      title="Replace current selection"
+                    >
+                      <Replace className="w-3 h-3" />
+                      Replace
+                    </button>
+                  )}
+                  {onRetry && (
+                    <button
+                      onClick={onRetry}
+                      className="text-xs text-text-tertiary-light dark:text-text-tertiary-dark hover:text-accent-warm/80 transition-colors ml-auto"
+                    >
+                      Retry
+                    </button>
+                  )}
+                </div>
               )}
             </div>
           </motion.div>

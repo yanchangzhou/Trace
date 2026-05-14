@@ -10,7 +10,14 @@ import {
   Quote,
   Minus,
   Sparkles,
+  FileText,
+  ListTodo,
+  Languages,
+  MessageSquare,
+  Pencil,
+  Lightbulb,
 } from 'lucide-react';
+import { triggerAIAction } from '@/lib/ai-trigger';
 
 export interface CommandItem {
   key: string;
@@ -87,12 +94,60 @@ export const commands: CommandItem[] = [
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
   {
-    key: 'ai-write',
-    label: 'AI Write',
-    description: 'Generate content with AI',
+    key: 'ai-continue',
+    label: 'Continue Writing',
+    description: 'AI continues from your cursor position',
+    icon: Pencil,
+    category: 'ai',
+    action: (editor) => triggerAIAction('continue', editor),
+  },
+  {
+    key: 'ai-improve',
+    label: 'Improve Writing',
+    description: 'Polish and improve selected text',
     icon: Sparkles,
     category: 'ai',
-    action: () => {},
+    action: (editor) => triggerAIAction('improve', editor),
+  },
+  {
+    key: 'ai-summarize',
+    label: 'Summarize',
+    description: 'Summarize current document',
+    icon: FileText,
+    category: 'ai',
+    action: (editor) => triggerAIAction('summarize', editor),
+  },
+  {
+    key: 'ai-outline',
+    label: 'Generate Outline',
+    description: 'Create a structured outline',
+    icon: ListTodo,
+    category: 'ai',
+    action: (editor) => triggerAIAction('outline', editor),
+  },
+  {
+    key: 'ai-translate',
+    label: 'Translate',
+    description: 'Translate selected text',
+    icon: Languages,
+    category: 'ai',
+    action: (editor) => triggerAIAction('translate', editor),
+  },
+  {
+    key: 'ai-ask',
+    label: 'Ask AI',
+    description: 'Ask AI anything about your writing',
+    icon: MessageSquare,
+    category: 'ai',
+    action: (editor) => triggerAIAction('ask', editor),
+  },
+  {
+    key: 'ai-explain',
+    label: 'Explain',
+    description: 'Explain selected text in simpler terms',
+    icon: Lightbulb,
+    category: 'ai',
+    action: (editor) => triggerAIAction('explain', editor),
   },
 ];
 

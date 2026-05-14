@@ -10,7 +10,7 @@ import { parseDocument } from '@/lib/documentParser';
 import { buildPreviewFileFromBytes } from '@/lib/previewFile';
 import DocumentRenderer from './DocumentRenderer';
 import { invoke } from '@tauri-apps/api/core';
-import { getDocumentChunks } from '@/lib/tauri';
+import { getDocumentChunks, isTauriEnvironment } from '@/lib/tauri';
 
 const springConfig = {
   type: 'spring' as const,
@@ -35,16 +35,7 @@ export default function FilePreviewPanel() {
   const headingListRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const checkTauri = () => {
-      try {
-        if (typeof window !== 'undefined' && (window as unknown as { __TAURI__?: unknown }).__TAURI__) {
-          setIsTauri(true);
-        }
-      } catch {
-        /* browser */
-      }
-    };
-    checkTauri();
+    setIsTauri(isTauriEnvironment());
   }, []);
 
   useEffect(() => {
