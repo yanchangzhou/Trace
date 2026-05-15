@@ -1,5 +1,13 @@
-import { invoke } from '@tauri-apps/api/core';
-import type { Book, SourceFile, ContentSearchResult, DocumentChunk, Note, NoteSource, AIRequest } from '@/types';
+import { invoke as tauriInvoke, Channel } from '@tauri-apps/api/core';
+import type { Book, SourceFile, ContentSearchResult, DocumentChunk, Note, NoteSource, AIRequest, AIStreamEvent } from '@/types';
+
+// Safe invoke wrapper — throws with a clear error when Tauri is not available
+async function safeInvoke<T>(command: string, args?: Record<string, unknown>): Promise<T> {
+  if (!isTauriEnvironment()) {
+    throw new Error(`Tauri command "${command}" is not available outside the Tauri desktop app.`);
+  }
+  return await tauriInvoke<T>(command, args);
+}
 
 export interface SearchResult {
   name: string;
@@ -93,7 +101,7 @@ function extractBookIdFromPath(path: string, docsFolder: string): string | null 
 
 async function invokeOptional<T>(command: string, args?: Record<string, unknown>): Promise<T | null> {
   try {
-    return await invoke<T>(command, args);
+    return await safeInvoke<T>(command, args);
   } catch (error) {
     console.warn(`Tauri command \"${command}\" unavailable or failed`, error);
     return null;
@@ -105,23 +113,23 @@ export function isTauriEnvironment(): boolean {
 }
 
 export async function searchLocalFiles(query: string): Promise<SearchResult[]> {
-  return await invoke<SearchResult[]>('search_local_files', { query });
+  return await safeInvoke<SearchResult[]>('search_local_files', { query });
 }
 
 export async function getDocsFolder(): Promise<string> {
-  return await invoke<string>('get_docs_folder');
+  return await safeInvoke<string>('get_docs_folder');
 }
 
 export async function reindexFiles(): Promise<number> {
-  return await invoke<number>('reindex_files');
+  return await safeInvoke<number>('reindex_files');
 }
 
 export async function openFile(path: string): Promise<void> {
-  return await invoke<void>('open_file', { path });
+  return await safeInvoke<void>('open_file', { path });
 }
 
 async function listAllFiles(): Promise<SearchResult[]> {
-  return await invoke<SearchResult[]>('list_all_files');
+  return await safeInvoke<SearchResult[]>('list_all_files');
 }
 
 export async function listFilesByBook(bookId: string): Promise<SourceFile[]> {
@@ -210,7 +218,7 @@ export async function createLibraryBook(name: string): Promise<{ book: Book; per
   }
 
   const bookId = generateBookId(name);
-  await invoke<string>('create_book_folder', { bookId });
+  await safeInvoke<string>('create_book_folder', { bookId });
 
   return {
     book: {
@@ -234,7 +242,7 @@ export async function deleteLibraryBook(bookId: string): Promise<void> {
     return;
   }
 
-  await invoke<void>('delete_book_folder', { bookId });
+  await safeInvoke<void>('delete_book_folder', { bookId });
 }
 
 export async function deleteLibraryFile(file: SourceFile): Promise<void> {
@@ -282,15 +290,15 @@ export function storeCurrentBookId(bookId: string | null): void {
 // ── Stage 2: Content search & document retrieval ──
 
 export async function searchDocuments(query: string, scope?: string): Promise<ContentSearchResult[]> {
-  return await invoke<ContentSearchResult[]>('search_documents', { query, scope });
+  return await safeInvoke<ContentSearchResult[]>('search_documents', { query, scope });
 }
 
 export async function getDocumentChunks(fileId: string): Promise<DocumentChunk[]> {
-  return await invoke<DocumentChunk[]>('get_document_chunks', { fileId });
+  return await safeInvoke<DocumentChunk[]>('get_document_chunks', { fileId });
 }
 
 export async function summarizeDocument(fileId: string): Promise<string> {
-  return await invoke<string>('summarize_document', { fileId });
+  return await safeInvoke<string>('summarize_document', { fileId });
 }
 
 export async function getIndexStats(): Promise<{
@@ -299,41 +307,230 @@ export async function getIndexStats(): Promise<{
   index_size_bytes: number;
   last_indexed_at: number;
 }> {
-  return await invoke('get_index_stats');
+  return await safeInvoke('get_index_stats');
 }
 
 // ── Stage 3: Notes & AI ──
 
+// Browser-mode localStorage fallback for notes
+const BROWSER_NOTES_KEY = 'trace_browser_notes';
+
+interface BrowserNoteStore {
+  [noteId: string]: { bookId: string; title: string; contentJson: string; plainText: string; createdAt: number; updatedAt: number };
+}
+
+function getBrowserNotes(): BrowserNoteStore {
+  if (typeof window === 'undefined') return {};
+  try {
+    return JSON.parse(window.localStorage.getItem(BROWSER_NOTES_KEY) || '{}');
+  } catch { return {}; }
+}
+
+function setBrowserNotes(store: BrowserNoteStore) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(BROWSER_NOTES_KEY, JSON.stringify(store));
+}
+
+function browserNoteId(): string {
+  return `browser-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
 export async function createNote(bookId: string, title: string, contentJson: string, plainText: string): Promise<Note> {
-  return await invoke<Note>('create_note', { bookId, title, contentJson, plainText });
+  if (!isTauriEnvironment()) {
+    const id = browserNoteId();
+    const now = Date.now();
+    const store = getBrowserNotes();
+    store[id] = { bookId, title, contentJson, plainText, createdAt: now, updatedAt: now };
+    setBrowserNotes(store);
+    return { id, book_id: bookId, title, content_json: contentJson, plain_text: plainText, created_at: now, updated_at: now };
+  }
+  return await safeInvoke<Note>('create_note', { bookId, title, contentJson, plainText });
 }
 
 export async function updateNote(noteId: string, title: string, contentJson: string, plainText: string): Promise<Note> {
-  return await invoke<Note>('update_note', { noteId, title, contentJson, plainText });
+  if (!isTauriEnvironment()) {
+    const store = getBrowserNotes();
+    const entry = store[noteId];
+    if (!entry) throw new Error(`Note ${noteId} not found`);
+    const now = Date.now();
+    store[noteId] = { ...entry, title, contentJson, plainText, updatedAt: now };
+    setBrowserNotes(store);
+    return { id: noteId, book_id: entry.bookId, title, content_json: contentJson, plain_text: plainText, created_at: entry.createdAt, updated_at: now };
+  }
+  return await safeInvoke<Note>('update_note', { noteId, title, contentJson, plainText });
 }
 
 export async function getNote(noteId: string): Promise<Note> {
-  return await invoke<Note>('get_note', { noteId });
+  if (!isTauriEnvironment()) {
+    const store = getBrowserNotes();
+    const entry = store[noteId];
+    if (!entry) throw new Error(`Note ${noteId} not found`);
+    return { id: noteId, book_id: entry.bookId, title: entry.title, content_json: entry.contentJson, plain_text: entry.plainText, created_at: entry.createdAt, updated_at: entry.updatedAt };
+  }
+  return await safeInvoke<Note>('get_note', { noteId });
 }
 
 export async function listNotesByBook(bookId: string): Promise<Note[]> {
-  return await invoke<Note[]>('list_notes_by_book', { bookId });
+  if (!isTauriEnvironment()) {
+    const store = getBrowserNotes();
+    return Object.entries(store)
+      .filter(([, v]) => v.bookId === bookId)
+      .map(([id, v]) => ({ id, book_id: v.bookId, title: v.title, content_json: v.contentJson, plain_text: v.plainText, created_at: v.createdAt, updated_at: v.updatedAt }));
+  }
+  return await safeInvoke<Note[]>('list_notes_by_book', { bookId });
 }
 
 export async function buildAIContext(request: AIRequest): Promise<string> {
-  return await invoke<string>('build_ai_context', { request });
+  return await safeInvoke<string>('build_ai_context', { request });
 }
 
-export async function generateWithContext(
-  request: AIRequest,
+export interface ChatMessage {
+  role: string;
+  content: string;
+}
+
+export interface FileInfo {
+  name: string;
+  extension: string;
+  size?: number;
+}
+
+async function callDeepSeekBrowser(
+  messages: ChatMessage[],
   onToken: (token: string) => void,
-  onSource: (source: import('@/types').AISource) => void,
 ): Promise<string> {
-  return await invoke<string>('generate_with_context', {
-    request,
-    onToken,
-    onSource,
+  const response = await fetch('/api/ai/stream', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ messages }),
   });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => ({ error: `HTTP ${response.status}` }));
+    throw new Error(data.error || `HTTP ${response.status}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error('No response body');
+
+  const decoder = new TextDecoder();
+  let fullResponse = '';
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop() || '';
+
+    for (const line of lines) {
+      if (!line.startsWith('data: ')) continue;
+      const data = line.slice(6);
+      if (data === '[DONE]') continue;
+
+      try {
+        const chunk = JSON.parse(data);
+        const content = chunk.choices?.[0]?.delta?.content;
+        if (content) {
+          fullResponse += content;
+          onToken(content);
+        }
+      } catch {
+        // skip malformed JSON lines
+      }
+    }
+  }
+
+  return fullResponse;
+}
+
+export async function generateAIStream(
+  messages: ChatMessage[],
+  request: AIRequest | null,
+  onToken: (token: string) => void,
+  onDone: (fullResponse: string) => void,
+  onError: (error: string) => void,
+  files: FileInfo[] = [],
+): Promise<void> {
+  if (isTauriEnvironment()) {
+    // Use Tauri backend — Rust builds context from actual DB data, API key stays in Rust
+    try {
+      const channel = new Channel<AIStreamEvent>();
+      channel.onmessage = (chunk: AIStreamEvent) => {
+        switch (chunk.type) {
+          case 'token':
+            if (chunk.content) onToken(chunk.content);
+            break;
+          case 'done':
+            if (chunk.content) onDone(chunk.content);
+            break;
+          case 'error':
+            if (chunk.error) onError(chunk.error);
+            break;
+        }
+      };
+
+      await safeInvoke<string>('generate_ai_stream', {
+        messagesJson: JSON.stringify(messages),
+        request,
+        onChunk: channel,
+      });
+    } catch (err) {
+      onError(String(err));
+    }
+  } else {
+    // Browser fallback: build a context prompt with file info + call DeepSeek directly
+    try {
+      let apiMessages = messages;
+      if (request && (request.context_file_ids.length > 0 || request.prompt || files.length > 0)) {
+        const contextPrompt = buildSimpleContextPrompt(request, files);
+        apiMessages = [
+          { role: 'system', content: contextPrompt },
+          ...apiMessages,
+        ];
+      }
+
+      const fullResponse = await callDeepSeekBrowser(apiMessages, onToken);
+      onDone(fullResponse);
+    } catch (err) {
+      onError(String(err));
+    }
+  }
+}
+
+function buildSimpleContextPrompt(request: AIRequest, files: FileInfo[]): string {
+  const actionPrompts: Record<string, string> = {
+    summarize: 'Summarize the provided documents concisely.',
+    compare: 'Compare the provided documents, highlighting similarities and differences.',
+    outline: 'Generate a structured outline based on the provided documents.',
+    free: 'Answer the user\'s question helpfully.',
+  };
+  const stylePrompts: Record<string, string> = {
+    academic: 'Use a formal, academic tone with precise terminology.',
+    analytical: 'Use an analytical tone focused on data and logical reasoning.',
+    concise: 'Be brief and direct. Use short sentences.',
+    my_style: 'Match the user\'s writing style from their notes.',
+  };
+
+  const action = actionPrompts[request.action] || actionPrompts.free;
+  const style = request.style && stylePrompts[request.style] ? `\n\nStyle: ${stylePrompts[request.style]}` : '';
+
+  // Include file information in the context
+  let fileContext = '';
+  if (files.length > 0) {
+    fileContext = '\n\n## Available Files\n';
+    for (const f of files) {
+      const size = f.size ? ` (${formatFileSize(f.size)})` : '';
+      fileContext += `- ${f.name} [${f.extension}]${size}\n`;
+    }
+    fileContext += '\nUse the information from these files to answer the user\'s question. If you need specific content from a file, ask the user to paste the relevant text.';
+  }
+
+  const prompt = request.prompt ? `\n\nUser Request: ${request.prompt}` : '';
+
+  return `${action}${style}${fileContext}${prompt}`;
 }
 
 // ── Stage 5: Style profiles ──

@@ -101,6 +101,9 @@ fn handle_file_event(event: &Event, search_engine: &SearchEngine, db: &Database)
                             let _ = search_engine.index_chunk(chunk, &file_name, &file_path_str, &extension);
                         }
                         let _ = db.insert_chunks(&chunks);
+                        if let Some(doc_record) = crate::parser::create_document_record(path, &file_id, now) {
+                            let _ = db.upsert_document(&doc_record);
+                        }
                         let _ = search_engine.commit();
                     }
                 }
@@ -127,6 +130,9 @@ fn handle_file_event(event: &Event, search_engine: &SearchEngine, db: &Database)
                                 let _ = search_engine.index_chunk(chunk, &file_name, &file_path_str, &extension);
                             }
                             let _ = db.insert_chunks(&chunks);
+                            if let Some(doc_record) = crate::parser::create_document_record(path, &file_record.id, now_secs()) {
+                                let _ = db.upsert_document(&doc_record);
+                            }
                         }
                     }
                     search_engine.commit()?;

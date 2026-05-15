@@ -6,11 +6,7 @@ import { useState, useRef, useEffect } from 'react';
 import type { Editor } from '@tiptap/react';
 
 interface BlockMenuProps {
-<<<<<<< HEAD
   editor?: Editor | null;
-=======
-  editor: Editor;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 }
 
 export default function BlockMenu({ editor }: BlockMenuProps) {
@@ -19,10 +15,7 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-<<<<<<< HEAD
     if (!editor) return;
-=======
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const handler = () => {
       const { from } = editor.state.selection;
       const resolved = editor.state.doc.resolve(from);
@@ -46,11 +39,7 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   }, []);
 
   const deleteBlock = () => {
-<<<<<<< HEAD
     if (!editor || activeBlockPos === null) return;
-=======
-    if (activeBlockPos === null) return;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     editor.chain().focus().deleteRange({ from: activeBlockPos, to: activeBlockPos + node.nodeSize }).run();
@@ -58,11 +47,7 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   };
 
   const duplicateBlock = () => {
-<<<<<<< HEAD
     if (!editor || activeBlockPos === null) return;
-=======
-    if (activeBlockPos === null) return;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     editor.chain().focus().insertContentAt(activeBlockPos + node.nodeSize, node.toJSON()).run();
@@ -70,16 +55,11 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   };
 
   const moveBlockUp = () => {
-<<<<<<< HEAD
     if (!editor || activeBlockPos === null || activeBlockPos <= 1) return;
-=======
-    if (activeBlockPos === null || activeBlockPos <= 1) return;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     const tr = editor.state.tr;
     tr.delete(activeBlockPos, activeBlockPos + node.nodeSize);
-    // Find previous sibling block
     const resolved = editor.state.doc.resolve(activeBlockPos);
     const prevPos = resolved.before(resolved.depth + 1);
     tr.insert(prevPos > 0 ? prevPos : 0, node);
@@ -88,11 +68,7 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
   };
 
   const moveBlockDown = () => {
-<<<<<<< HEAD
     if (!editor || activeBlockPos === null) return;
-=======
-    if (activeBlockPos === null) return;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     const node = editor.state.doc.nodeAt(activeBlockPos);
     if (!node) return;
     const tr = editor.state.tr;
@@ -103,13 +79,8 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
     setShowActions(false);
   };
 
-<<<<<<< HEAD
   if (!editor || activeBlockPos === null) return null;
-=======
-  if (activeBlockPos === null) return null;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
-  // Position the menu near the active block
   const coords = editor.view.coordsAtPos(activeBlockPos);
   const editorRect = editor.view.dom.getBoundingClientRect();
 
@@ -123,7 +94,6 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
       }}
     >
       <div className="flex items-center gap-0.5">
-        {/* Drag handle */}
         <button
           className="block-drag-handle w-6 h-6 flex items-center justify-center rounded opacity-0 hover:opacity-100 transition-opacity cursor-grab active:cursor-grabbing text-text-tertiary-light dark:text-text-tertiary-dark hover:bg-black/5 dark:hover:bg-white/5"
           style={{ opacity: 1 }}
@@ -132,7 +102,6 @@ export default function BlockMenu({ editor }: BlockMenuProps) {
           <GripVertical className="w-4 h-4" />
         </button>
 
-        {/* Add/Block actions trigger */}
         <button
           onClick={() => setShowActions((v) => !v)}
           className="w-6 h-6 flex items-center justify-center rounded opacity-0 hover:opacity-100 transition-opacity text-text-tertiary-light dark:text-text-tertiary-dark hover:bg-black/5 dark:hover:bg-white/5"

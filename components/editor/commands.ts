@@ -10,16 +10,12 @@ import {
   Quote,
   Minus,
   Sparkles,
-<<<<<<< HEAD
   FileText,
   ListTodo,
   MessageSquare,
   Languages,
 } from 'lucide-react';
 import { triggerAIInline } from '@/lib/ai-bridge';
-=======
-} from 'lucide-react';
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
 export interface CommandItem {
   key: string;
@@ -33,73 +29,72 @@ export interface CommandItem {
 export const commands: CommandItem[] = [
   {
     key: 'h1',
-    label: 'Heading 1',
-    description: 'Large section heading',
+    label: '一级标题',
+    description: '大型章节标题',
     icon: Heading1,
     category: 'block',
     action: (editor) => editor.chain().focus().setHeading({ level: 1 }).run(),
   },
   {
     key: 'h2',
-    label: 'Heading 2',
-    description: 'Medium section heading',
+    label: '二级标题',
+    description: '中型章节标题',
     icon: Heading2,
     category: 'block',
     action: (editor) => editor.chain().focus().setHeading({ level: 2 }).run(),
   },
   {
     key: 'h3',
-    label: 'Heading 3',
-    description: 'Small section heading',
+    label: '三级标题',
+    description: '小型章节标题',
     icon: Heading3,
     category: 'block',
     action: (editor) => editor.chain().focus().setHeading({ level: 3 }).run(),
   },
   {
     key: 'quote',
-    label: 'Blockquote',
-    description: 'Quoted text block',
+    label: '引用块',
+    description: '引用文本块',
     icon: Quote,
     category: 'block',
     action: (editor) => editor.chain().focus().toggleBlockquote().run(),
   },
   {
     key: 'divider',
-    label: 'Divider',
-    description: 'Horizontal rule',
+    label: '分隔线',
+    description: '水平分割线',
     icon: Minus,
     category: 'block',
     action: (editor) => editor.chain().focus().setHorizontalRule().run(),
   },
   {
     key: 'bullet',
-    label: 'Bullet List',
-    description: 'Simple bullet list',
+    label: '无序列表',
+    description: '简单的项目符号列表',
     icon: List,
     category: 'block',
     action: (editor) => editor.chain().focus().toggleBulletList().run(),
   },
   {
     key: 'ordered',
-    label: 'Numbered List',
-    description: 'Ordered list with numbers',
+    label: '有序列表',
+    description: '带编号的列表',
     icon: ListOrdered,
     category: 'block',
     action: (editor) => editor.chain().focus().toggleOrderedList().run(),
   },
   {
     key: 'code',
-    label: 'Code Block',
-    description: 'Code snippet with syntax',
+    label: '代码块',
+    description: '带语法高亮的代码片段',
     icon: Code2,
     category: 'block',
     action: (editor) => editor.chain().focus().toggleCodeBlock().run(),
   },
   {
-<<<<<<< HEAD
     key: 'ai-continue',
-    label: 'Continue Writing',
-    description: 'AI continues from your cursor position',
+    label: '继续写作',
+    description: 'AI 从光标位置继续写作',
     icon: Sparkles,
     category: 'ai',
     action: (editor) => {
@@ -117,8 +112,8 @@ export const commands: CommandItem[] = [
   },
   {
     key: 'ai-improve',
-    label: 'Improve Writing',
-    description: 'Polish and improve the selected text',
+    label: '改进写作',
+    description: '润色和改进选中的文本',
     icon: Sparkles,
     category: 'ai',
     action: (editor) => {
@@ -137,8 +132,8 @@ export const commands: CommandItem[] = [
   },
   {
     key: 'ai-summarize',
-    label: 'Summarize Document',
-    description: 'AI summary of the current document',
+    label: '摘要文档',
+    description: 'AI 总结当前文档内容',
     icon: FileText,
     category: 'ai',
     action: (editor) => {
@@ -155,8 +150,8 @@ export const commands: CommandItem[] = [
   },
   {
     key: 'ai-outline',
-    label: 'Generate Outline',
-    description: 'AI outline based on current content',
+    label: '生成大纲',
+    description: '基于当前内容生成大纲',
     icon: ListTodo,
     category: 'ai',
     action: (editor) => {
@@ -173,8 +168,8 @@ export const commands: CommandItem[] = [
   },
   {
     key: 'ai-translate',
-    label: 'Translate',
-    description: 'Translate selected text to English',
+    label: '翻译',
+    description: '将选中文本翻译为英文',
     icon: Languages,
     category: 'ai',
     action: (editor) => {
@@ -193,8 +188,8 @@ export const commands: CommandItem[] = [
   },
   {
     key: 'ai-ask',
-    label: 'Ask AI',
-    description: 'Open inline input to ask AI anything',
+    label: '询问 AI',
+    description: '打开内联输入框向 AI 提问',
     icon: MessageSquare,
     category: 'ai',
     action: (editor) => {
@@ -209,14 +204,6 @@ export const commands: CommandItem[] = [
         position: { x: coords.left, y: coords.bottom },
       });
     },
-=======
-    key: 'ai-write',
-    label: 'AI Write',
-    description: 'Generate content with AI',
-    icon: Sparkles,
-    category: 'ai',
-    action: () => {},
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   },
 ];
 

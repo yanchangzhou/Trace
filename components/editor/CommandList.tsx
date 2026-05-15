@@ -7,11 +7,7 @@ import type { Editor } from '@tiptap/react';
 import type { CommandItem } from './commands';
 
 interface CommandListProps {
-<<<<<<< HEAD
   editor?: Editor | null;
-=======
-  editor: Editor;
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   items: CommandItem[];
   command: (item: CommandItem) => void;
   clientRect?: (() => DOMRect | null) | null;
@@ -115,7 +111,7 @@ export default function CommandList({
         {blockItems.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-[#9C958D]">
-              Blocks
+              文本格式
             </div>
             {blockItems.map((item) => {
               const idx = items.indexOf(item);
@@ -153,7 +149,7 @@ export default function CommandList({
         {aiItems.length > 0 && (
           <>
             <div className="px-3 py-1.5 text-[11px] font-medium uppercase tracking-wider text-[#9C958D]">
-              AI Actions
+              AI 操作
             </div>
             {aiItems.map((item) => {
               const idx = items.indexOf(item);
@@ -187,7 +183,7 @@ export default function CommandList({
 
         {items.length === 0 && (
           <div className="px-3 py-6 text-center text-sm text-[#9C958D]">
-            No matching commands
+            无匹配命令
           </div>
         )}
       </div>

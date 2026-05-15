@@ -5,97 +5,34 @@ import { X, Sparkles, Copy, Check, RotateCcw } from 'lucide-react';
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useEditorContext } from '@/contexts/EditorContext';
 import { copyToClipboard } from '@/lib/clipboard';
+import { generateAIStream } from '@/lib/tauri';
+import type { ChatMessage } from '@/lib/tauri';
 
 const ACTION_LABELS: Record<string, string> = {
-  continue: 'Continue Writing',
-  improve: 'Improve Writing',
-  summarize: 'Summarize',
-  outline: 'Generate Outline',
-  translate: 'Translate',
-  ask: 'Ask AI',
+  continue: '继续写作',
+  improve: '改进写作',
+  summarize: '摘要',
+  outline: '生成大纲',
+  translate: '翻译',
+  ask: '询问 AI',
 };
 
-function buildDemoResponse(action: string, context: string): string {
+function buildSystemPrompt(action: string): string {
   switch (action) {
     case 'continue':
-      return [
-        'The next logical step in this argument would be to consider the broader implications of these findings. ',
-        'When we examine the underlying patterns more closely, several key themes emerge that warrant further exploration.\n\n',
-        'First, the relationship between structure and meaning becomes increasingly significant as we delve deeper into the subject matter. ',
-        'This connection suggests that our initial framework, while useful, may need to be expanded to accommodate these new insights.\n\n',
-        'Furthermore, the practical applications of this approach extend beyond the immediate context, ',
-        'offering potential solutions to related challenges in the field.',
-      ].join('');
-    case 'improve': {
-      const original = context.slice(0, 200) || 'your selected text';
-      return [
-        'Here is the improved version of your text:\n\n',
-        '> The core ideas in your writing are strong, but the expression can be refined for greater clarity and impact. ',
-        'I have restructured the sentences to improve flow, eliminated redundancy, and strengthened the vocabulary ',
-        'while preserving your original voice and intent.\n\n',
-        'The revised passage maintains the same key points while making them more accessible and engaging for readers. ',
-        'Pay attention to how the transitions between paragraphs create a more cohesive narrative arc.',
-      ].join('');
-    }
+      return 'Continue writing from the provided text. Maintain the same tone, style, and voice. Do not repeat the text, just continue naturally from where it ends.';
+    case 'improve':
+      return 'Improve the provided text. Make it clearer, more engaging, and fix any grammar, style, or structure issues while preserving the original meaning.';
     case 'summarize':
-      return [
-        '## Summary\n\n',
-        'This document covers several interconnected topics that form a cohesive argument. ',
-        'The main thesis revolves around the importance of structured thinking in complex problem-solving scenarios.\n\n',
-        '**Key Points:**\n',
-        '- The introduction establishes the foundational concepts and sets up the central question\n',
-        '- The middle sections develop supporting arguments with relevant examples and evidence\n',
-        '- The conclusion synthesizes the findings and proposes actionable next steps\n\n',
-        'Overall, the document presents a well-reasoned perspective that balances theoretical depth with practical applicability.',
-      ].join('');
+      return 'Summarize the provided text concisely. Highlight the key points and main ideas.';
     case 'outline':
-      return [
-        '## Structured Outline\n\n',
-        '**1. Introduction**\n',
-        '   - Background and context\n',
-        '   - Problem statement\n',
-        '   - Thesis / main argument\n\n',
-        '**2. Core Analysis**\n',
-        '   - 2.1 First key concept\n',
-        '     - Supporting evidence\n',
-        '     - Counter-arguments\n',
-        '   - 2.2 Second key concept\n',
-        '     - Case studies\n',
-        '     - Implications\n\n',
-        '**3. Synthesis & Recommendations**\n',
-        '   - 3.1 Connecting the threads\n',
-        '   - 3.2 Practical applications\n',
-        '   - 3.3 Future directions\n\n',
-        '**4. Conclusion**\n',
-        '   - Summary of findings\n',
-        '   - Call to action',
-      ].join('');
+      return 'Generate a well-structured outline based on the provided text. Use hierarchical numbering.';
     case 'translate':
-      return [
-        '## Translation\n\n',
-        'Here is the English translation of your selected text:\n\n',
-        '---\n\n',
-        'The translated content preserves the original meaning while adapting idioms ',
-        'and cultural references for an English-speaking audience. The tone and register ',
-        'have been carefully maintained to match the source material.\n\n',
-        '---\n\n',
-        'Note: This is a simulated translation. In production, DeepSeek will provide ',
-        'accurate translations with support for multiple language pairs.',
-      ].join('');
+      return 'Translate the provided text to English. Preserve the original meaning and tone.';
     case 'ask':
-      return [
-        'Great question! Based on the context of your document, here is what I think:\n\n',
-        'The approach you are taking aligns well with established best practices in this area. ',
-        'The key consideration is to maintain consistency throughout the document while ',
-        'allowing for flexibility in how individual sections are structured.\n\n',
-        'Some specific suggestions:\n',
-        '- Consider adding more concrete examples to support your abstract points\n',
-        '- The transition between sections 2 and 3 could be smoother\n',
-        '- Your conclusion effectively ties together the main themes\n\n',
-        'Feel free to ask follow-up questions or request clarification on any of these points.',
-      ].join('');
+      return 'Answer the user\'s question based on the provided context. Be helpful and thorough.';
     default:
-      return 'AI response for: ' + action;
+      return 'Help the user with the provided text.';
   }
 }
 
@@ -141,26 +78,45 @@ export default function AIInlinePopup() {
     setPosition({ top, left });
   }, [aiInlineState]);
 
-  // Start demo streaming
+  // Start real AI streaming
   useEffect(() => {
     if (!aiInlineState) return;
-    const demoResponse = buildDemoResponse(action, aiInlineState.context);
     setStreamBuffer('');
     setFullResponse('');
     setIsStreaming(true);
 
-    let charIndex = 0;
-    streamTimerRef.current = setInterval(() => {
-      if (charIndex < demoResponse.length) {
-        setStreamBuffer(demoResponse.slice(0, charIndex + 1));
-        charIndex++;
-      } else {
-        if (streamTimerRef.current) clearInterval(streamTimerRef.current);
-        setFullResponse(demoResponse);
+    const systemPrompt = buildSystemPrompt(action);
+    const chatMessages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: aiInlineState.context || 'No context provided.' },
+    ];
+
+    let streamedText = '';
+
+    generateAIStream(
+      chatMessages,
+      null,
+      // onToken
+      (token) => {
+        streamedText += token;
+        setStreamBuffer(streamedText);
+      },
+      // onDone
+      (fullResponse) => {
+        setFullResponse(fullResponse);
         setStreamBuffer('');
         setIsStreaming(false);
-      }
-    }, 10);
+      },
+      // onError
+      (error) => {
+        setFullResponse(`Error: ${error}`);
+        setStreamBuffer('');
+        setIsStreaming(false);
+      },
+    ).catch((err) => {
+      setIsStreaming(false);
+      setStreamBuffer('');
+    });
 
     return () => {
       if (streamTimerRef.current) clearInterval(streamTimerRef.current);
@@ -216,22 +172,39 @@ export default function AIInlinePopup() {
 
   const handleRetry = useCallback(() => {
     if (!aiInlineState) return;
-    const demoResponse = buildDemoResponse(action, aiInlineState.context);
+    const systemPrompt = buildSystemPrompt(action);
+    const chatMessages: ChatMessage[] = [
+      { role: 'system', content: systemPrompt },
+      { role: 'user', content: aiInlineState.context || 'No context provided.' },
+    ];
+
     setStreamBuffer('');
     setFullResponse('');
     setIsStreaming(true);
-    let charIndex = 0;
-    streamTimerRef.current = setInterval(() => {
-      if (charIndex < demoResponse.length) {
-        setStreamBuffer(demoResponse.slice(0, charIndex + 1));
-        charIndex++;
-      } else {
-        if (streamTimerRef.current) clearInterval(streamTimerRef.current);
-        setFullResponse(demoResponse);
+
+    let streamedText = '';
+
+    generateAIStream(
+      chatMessages,
+      null,
+      (token) => {
+        streamedText += token;
+        setStreamBuffer(streamedText);
+      },
+      (fullResponse) => {
+        setFullResponse(fullResponse);
         setStreamBuffer('');
         setIsStreaming(false);
-      }
-    }, 10);
+      },
+      (error) => {
+        setFullResponse(`Error: ${error}`);
+        setStreamBuffer('');
+        setIsStreaming(false);
+      },
+    ).catch(() => {
+      setIsStreaming(false);
+      setStreamBuffer('');
+    });
   }, [aiInlineState, action]);
 
   const displayText = isStreaming ? streamBuffer : fullResponse;
@@ -256,7 +229,7 @@ export default function AIInlinePopup() {
             </span>
             {mode === 'replace' && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-accent-warm/10 text-accent-warm font-medium">
-                Replace
+                替换
               </span>
             )}
           </div>
@@ -294,7 +267,7 @@ export default function AIInlinePopup() {
               disabled={!fullResponse}
               className="h-8 px-3 rounded-lg bg-accent-warm text-white text-xs font-medium hover:bg-accent-warm/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Insert
+              插入
             </button>
           ) : (
             <button
@@ -302,7 +275,7 @@ export default function AIInlinePopup() {
               disabled={!fullResponse}
               className="h-8 px-3 rounded-lg bg-accent-warm text-white text-xs font-medium hover:bg-accent-warm/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              Replace Selection
+              替换选中
             </button>
           )}
           <button
@@ -311,7 +284,7 @@ export default function AIInlinePopup() {
             className="h-8 px-3 rounded-lg border border-border-light dark:border-border-dark text-xs font-medium text-text-secondary-light dark:text-text-secondary-dark hover:bg-background-light dark:hover:bg-background-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
             {copied ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
-            {copied ? 'Copied' : 'Copy'}
+            {copied ? '已复制' : '复制'}
           </button>
           <div className="flex-1" />
           <button
@@ -320,7 +293,7 @@ export default function AIInlinePopup() {
             className="h-8 px-3 rounded-lg border border-border-light dark:border-border-dark text-xs font-medium text-text-secondary-light dark:text-text-secondary-dark hover:bg-background-light dark:hover:bg-background-dark transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center gap-1.5"
           >
             <RotateCcw className="w-3.5 h-3.5" />
-            Retry
+            重试
           </button>
         </div>
     </motion.div>

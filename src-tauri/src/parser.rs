@@ -467,6 +467,20 @@ pub fn split_into_chunks(text: &str, file_id: &str) -> Vec<crate::models::Docume
     chunks
 }
 
+/// Create a DocumentRecord from a parsed file (for AI context building)
+pub fn create_document_record(file_path: &Path, file_id: &str, now: i64) -> Option<crate::models::DocumentRecord> {
+    let parsed = parse_document(file_path).ok()?;
+    Some(crate::models::DocumentRecord {
+        file_id: file_id.to_string(),
+        summary: parsed.summary,
+        word_count: parsed.metadata.word_count,
+        page_count: parsed.metadata.page_count,
+        slide_count: parsed.metadata.slide_count,
+        headings_json: serde_json::to_string(&parsed.metadata.headings).unwrap_or_default(),
+        parsed_at: now,
+    })
+}
+
 /// Extract text from XML content (simple approach)
 fn extract_text_from_xml(xml: &str) -> String {
     use xml::reader::{EventReader, XmlEvent};

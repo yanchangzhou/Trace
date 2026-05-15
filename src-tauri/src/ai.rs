@@ -1,9 +1,125 @@
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use serde::{Deserialize, Serialize};
+use tauri::ipc::Channel;
 use crate::db::Database;
 use crate::models::*;
 
-<<<<<<< HEAD
+/// OpenAI-compatible chat message
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatMessage {
+    pub role: String,
+    pub content: String,
+}
+
+/// OpenAI-compatible chat completion request body
+#[derive(Debug, Serialize)]
+struct ChatCompletionRequest {
+    model: String,
+    messages: Vec<ChatMessage>,
+    stream: bool,
+}
+
+/// OpenAI-compatible stream delta
+#[derive(Debug, Deserialize)]
+struct StreamDelta {
+    content: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChoice {
+    delta: StreamDelta,
+    finish_reason: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StreamChunk {
+    choices: Vec<StreamChoice>,
+}
+
+fn get_api_key() -> String {
+    std::env::var("DEEPSEEK_API_KEY")
+        .unwrap_or_else(|_| "sk-c49ca64d549e40adb47404ce59b75619".to_string())
+}
+
+/// Call DeepSeek API with streaming, sending each token through the provided Tauri IPC channel.
+/// Returns the full collected response text.
+pub async fn call_deepseek_stream(
+    messages: Vec<ChatMessage>,
+    channel: Channel<AIStreamChunk>,
+) -> Result<String> {
+    let api_key = get_api_key();
+    let client = reqwest::Client::new();
+
+    let body = ChatCompletionRequest {
+        model: "deepseek-chat".to_string(),
+        messages,
+        stream: true,
+    };
+
+    let response = client
+        .post("https://api.deepseek.com/chat/completions")
+        .header("Authorization", format!("Bearer {}", api_key))
+        .header("Content-Type", "application/json")
+        .header("Accept", "text/event-stream")
+        .json(&body)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        let error_msg = format!("DeepSeek API error ({}): {}", status, text);
+        let _ = channel.send(AIStreamChunk {
+            event_type: "error".to_string(),
+            content: None,
+            source: None,
+            error: Some(error_msg.clone()),
+        });
+        return Err(anyhow!(error_msg));
+    }
+
+    let mut full_response = String::new();
+    let mut stream = response.bytes_stream();
+
+    while let Some(chunk_result) = futures::StreamExt::next(&mut stream).await {
+        let chunk_bytes = chunk_result?;
+        let chunk_str = String::from_utf8_lossy(&chunk_bytes);
+
+        for line in chunk_str.lines() {
+            if !line.starts_with("data: ") {
+                continue;
+            }
+            let data = &line[6..]; // skip "data: "
+            if data == "[DONE]" {
+                break;
+            }
+            if let Ok(chunk) = serde_json::from_str::<StreamChunk>(data) {
+                for choice in &chunk.choices {
+                    if let Some(ref content) = choice.delta.content {
+                        full_response.push_str(content);
+                        let _ = channel.send(AIStreamChunk {
+                            event_type: "token".to_string(),
+                            content: Some(content.clone()),
+                            source: None,
+                            error: None,
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // Send done event with full response
+    let _ = channel.send(AIStreamChunk {
+        event_type: "done".to_string(),
+        content: Some(full_response.clone()),
+        source: None,
+        error: None,
+    });
+
+    Ok(full_response)
+}
+
 /// Truncate `s` to at most `max_len` bytes on a valid UTF-8 character boundary.
 fn safe_truncate(s: &str, max_len: usize) -> &str {
     if s.len() <= max_len { return s; }
@@ -13,9 +129,6 @@ fn safe_truncate(s: &str, max_len: usize) -> &str {
     }
     &s[..end]
 }
-
-=======
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 /// Build a context prompt from selected files and their chunks.
 pub fn build_ai_context(db: &Database, request: &AIRequest) -> Result<String> {
     let mut context = String::new();
@@ -43,16 +156,8 @@ pub fn build_ai_context(db: &Database, request: &AIRequest) -> Result<String> {
         if !chunks.is_empty() {
             context.push_str(&format!("### Chunks for: {}\n", file_id));
             for chunk in chunks.iter().take(10) {
-<<<<<<< HEAD
                 let snippet = safe_truncate(&chunk.text, 500);
                 context.push_str(&format!("{}\n---\n", snippet));
-=======
-                if chunk.text.len() > 500 {
-                    context.push_str(&format!("{}\n---\n", &chunk.text[..500]));
-                } else {
-                    context.push_str(&format!("{}\n---\n", chunk.text));
-                }
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
             }
             context.push('\n');
         }

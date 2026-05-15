@@ -18,13 +18,9 @@ import { useFilePreview } from '@/contexts/FilePreviewContext';
 import { useEditorContext } from '@/contexts/EditorContext';
 import { useBook } from '@/contexts/BookContext';
 import { createNote, updateNote } from '@/lib/tauri';
-<<<<<<< HEAD
 import { setAIInlineHandler } from '@/lib/ai-bridge';
 import EditorToolbar from './EditorToolbar';
 import AIInlinePopup from '@/components/ai/AIInlinePopup';
-=======
-import EditorToolbar from './EditorToolbar';
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 import { SlashCommand } from './suggestion';
 import { BlockDragExtension } from './BlockDragExtension';
 
@@ -49,7 +45,6 @@ export default function EditorShell() {
     registerInsertHandler,
     lastSavedAt,
     markSaved,
-<<<<<<< HEAD
     openAIInline,
     registerInsertGeneratedText,
     registerReplaceSelection,
@@ -65,13 +60,6 @@ export default function EditorShell() {
   useEffect(() => {
     setMounted(true);
   }, []);
-=======
-  } = useEditorContext();
-
-  const [plainText, setPlainText] = useState('');
-  const titleInputRef = useRef<HTMLInputElement>(null);
-  const autosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -89,21 +77,12 @@ export default function EditorShell() {
       BubbleMenuExtension.configure({
         shouldShow: ({ editor: e, state }) => {
           const { from, to, empty } = state.selection;
-<<<<<<< HEAD
           const hasText = e?.state?.doc?.textBetween(from, to, ' ')?.trim().length > 0;
           return e?.isFocused && !empty && hasText;
         },
       }),
       Placeholder.configure({
         placeholder: '按 / 启用命令或 AI 功能，或开始书写...',
-=======
-          const hasText = e.state.doc.textBetween(from, to, ' ').trim().length > 0;
-          return e.isFocused && !empty && hasText;
-        },
-      }),
-      Placeholder.configure({
-        placeholder: 'Start writing your thoughts...',
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
       }),
       BlockDragExtension.configure({
         dragHandleSelector: '.block-drag-handle',
@@ -118,18 +97,13 @@ export default function EditorShell() {
       },
     },
     onUpdate: ({ editor: e }) => {
-<<<<<<< HEAD
       if (!e) return;
       const text = e.getText?.() ?? '';
-=======
-      const text = e.getText();
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
       setPlainText(text);
       setSaveStatus('unsaved');
     },
   });
 
-<<<<<<< HEAD
   // Cleanup editor on unmount
   useEffect(() => {
     return () => {
@@ -139,23 +113,15 @@ export default function EditorShell() {
     };
   }, [editor]);
 
-=======
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   const wordCount = useMemo(() => plainText.split(/\s+/).filter(Boolean).length, [plainText]);
   const charCount = plainText.length;
 
   // Auto-save: debounce save after content changes
   const doSave = useCallback(async () => {
     if (!editor) return;
-<<<<<<< HEAD
     const contentJson = JSON.stringify(editor.getJSON?.() ?? {});
     const text = editor.getText?.() ?? '';
     if (!text.trim() && !noteId) return;
-=======
-    const contentJson = JSON.stringify(editor.getJSON());
-    const text = editor.getText();
-    if (!text.trim() && !noteId) return; // Don't save empty new notes
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
 
     setSaveStatus('saving');
     try {
@@ -220,7 +186,6 @@ export default function EditorShell() {
     return () => registerInsertHandler(null);
   }, [editor, registerInsertHandler]);
 
-<<<<<<< HEAD
   // Register AI inline bridge handler
   useEffect(() => {
     setAIInlineHandler((request) => {
@@ -250,8 +215,6 @@ export default function EditorShell() {
     };
   }, [editor, registerInsertGeneratedText, registerReplaceSelection]);
 
-=======
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
   const saveStatusLabel = saveStatus === 'saved'
     ? lastSavedAt ? `Saved ${new Date(lastSavedAt).toLocaleTimeString()}` : 'Saved'
     : saveStatus === 'saving' ? 'Saving...'
@@ -305,7 +268,6 @@ export default function EditorShell() {
           )}
 
           {/* Editor Content */}
-<<<<<<< HEAD
           {mounted && (
             <EditorContent
               editor={editor}
@@ -331,31 +293,6 @@ export default function EditorShell() {
               "
             />
           )}
-=======
-          <EditorContent
-            editor={editor}
-            className="
-              [&_.ProseMirror]:outline-none
-              [&_.ProseMirror_p.is-editor-empty:first-child::before]:content-[attr(data-placeholder)]
-              [&_.ProseMirror_p.is-editor-empty:first-child::before]:text-text-tertiary-light
-              [&_.ProseMirror_p.is-editor-empty:first-child::before]:dark:text-text-tertiary-dark
-              [&_.ProseMirror_p.is-editor-empty:first-child::before]:float-left
-              [&_.ProseMirror_p.is-editor-empty:first-child::before]:pointer-events-none
-              [&_.ProseMirror_p.is-editor-empty:first-child::before]:h-0
-              [&_.ProseMirror_p]:my-2
-              [&_.ProseMirror_h1]:text-4xl [&_.ProseMirror_h1]:font-semibold [&_.ProseMirror_h1]:leading-tight [&_.ProseMirror_h1]:my-4
-              [&_.ProseMirror_h2]:text-3xl [&_.ProseMirror_h2]:font-semibold [&_.ProseMirror_h2]:leading-tight [&_.ProseMirror_h2]:my-3
-              [&_.ProseMirror_h3]:text-2xl [&_.ProseMirror_h3]:font-semibold [&_.ProseMirror_h3]:leading-snug [&_.ProseMirror_h3]:my-3
-              [&_.ProseMirror_ul]:list-disc [&_.ProseMirror_ul]:pl-6 [&_.ProseMirror_ul]:my-2
-              [&_.ProseMirror_ol]:list-decimal [&_.ProseMirror_ol]:pl-6 [&_.ProseMirror_ol]:my-2
-              [&_.ProseMirror_li]:my-1
-              [&_.ProseMirror_code]:px-1.5 [&_.ProseMirror_code]:py-0.5 [&_.ProseMirror_code]:rounded [&_.ProseMirror_code]:bg-black/5
-              [&_.ProseMirror_a]:text-blue-600 [&_.ProseMirror_a]:underline
-              [&_.ProseMirror_blockquote]:border-l-4 [&_.ProseMirror_blockquote]:border-accent-warm/40 [&_.ProseMirror_blockquote]:pl-4 [&_.ProseMirror_blockquote]:my-4 [&_.ProseMirror_blockquote]:text-text-secondary-light [&_.ProseMirror_blockquote]:dark:text-text-secondary-dark [&_.ProseMirror_blockquote]:italic
-              [&_.ProseMirror_hr]:my-8 [&_.ProseMirror_hr]:border-border-light [&_.ProseMirror_hr]:dark:border-border-dark
-            "
-          />
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
         </motion.div>
 
         {/* Action Bar */}
@@ -405,11 +342,8 @@ export default function EditorShell() {
           </div>
         </motion.div>
       </motion.div>
-<<<<<<< HEAD
 
       {mounted && <AIInlinePopup />}
-=======
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
     </main>
   );
 }

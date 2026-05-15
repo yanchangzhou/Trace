@@ -41,8 +41,6 @@ export interface AIStreamEvent {
   source?: AISource;
   error?: string;
 }
-<<<<<<< HEAD
-
 export type AIInlineAction = 'continue' | 'improve' | 'summarize' | 'outline' | 'translate' | 'ask';
 
 export interface AIInlineRequest {
@@ -51,5 +49,3 @@ export interface AIInlineRequest {
   mode: 'insert' | 'replace';
   position: { x: number; y: number };
 }
-=======
->>>>>>> 30cda3db40c1e1da2714724ab44186a6ac965aa0
